@@ -60,39 +60,107 @@ class SyncController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Gera correspondências entre seções locais e seções do Moodle usando
-  /// similaridade de nomes (Jaro-Winkler).
+  /// Gera correspondências entre seções locais e seções do Moodle.
+  /// Prioriza links existentes (moodleSectionId/moodleModuleId) e depois
+  /// usa similaridade de nomes (Jaro-Winkler) para seções sem vínculo.
   void generateMatches(CourseConfig config) {
     _matches = [];
-    final moodleNames = _moodleSections.map((s) => s.name).toList();
+
+    // Pool de seções Moodle disponíveis (indexadas por id)
+    final availableMoodleSections = {for (final s in _moodleSections) s.id: s};
+
+    // 1ª passada: parear seções que já têm moodleSectionId vinculado
+    final linkedSections = <String, MoodleSection>{}; // localId → MoodleSection
+    for (final section in config.sections) {
+      if (section.moodleSectionId != null &&
+          availableMoodleSections.containsKey(section.moodleSectionId)) {
+        linkedSections[section.id] = availableMoodleSections.remove(
+          section.moodleSectionId,
+        )!;
+      }
+    }
+
+    // Lista de nomes restantes para match por similaridade
+    final remainingMoodleSections = availableMoodleSections.values.toList();
+    final remainingNames = remainingMoodleSections.map((s) => s.name).toList();
 
     for (final section in config.sections) {
-      final (idx, score) = StringMatcher.findBestMatch(
-        section.name,
-        moodleNames,
-      );
-
       MoodleSection? matched;
-      if (idx >= 0) {
-        matched = _moodleSections[idx];
+      double score = 0;
+
+      if (linkedSections.containsKey(section.id)) {
+        // Já vinculada por moodleSectionId
+        matched = linkedSections[section.id];
+        score = 1.0;
+      } else if (remainingNames.isNotEmpty) {
+        // Match por similaridade de nome (apenas entre seções não vinculadas)
+        final (idx, matchScore) = StringMatcher.findBestMatch(
+          section.name,
+          remainingNames,
+        );
+        score = matchScore;
+        if (idx >= 0 && matchScore > 0.3) {
+          matched = remainingMoodleSections[idx];
+          // Remover do pool para evitar duplicatas
+          remainingMoodleSections.removeAt(idx);
+          remainingNames.removeAt(idx);
+        }
       }
 
-      // Atividades - fazer match interno
+      // Atividades — usar vínculo existente ou match por nome
       final activityMatches = <ActivityMatch>[];
       if (matched != null) {
-        final moduleNames = matched.modules.map((m) => m.name).toList();
+        // Pool de módulos disponíveis
+        final availableModules = {for (final m in matched.modules) m.id: m};
+
+        // 1ª passada: atividades com moodleModuleId vinculado
+        final linkedActivities =
+            <String, MoodleModule>{}; // activityId → MoodleModule
         for (final activity in section.activities) {
-          final (aIdx, aScore) = StringMatcher.findBestMatch(
-            activity.name,
-            moduleNames,
-          );
-          activityMatches.add(
-            ActivityMatch(
-              local: activity,
-              moodleModule: aIdx >= 0 ? matched.modules[aIdx] : null,
-              score: aScore,
-            ),
-          );
+          if (activity.moodleModuleId != null &&
+              availableModules.containsKey(activity.moodleModuleId)) {
+            linkedActivities[activity.id] = availableModules.remove(
+              activity.moodleModuleId,
+            )!;
+          }
+        }
+
+        // Nomes restantes para match por similaridade
+        final remainingModules = availableModules.values.toList();
+        final remainingModNames = remainingModules.map((m) => m.name).toList();
+
+        for (final activity in section.activities) {
+          if (linkedActivities.containsKey(activity.id)) {
+            activityMatches.add(
+              ActivityMatch(
+                local: activity,
+                moodleModule: linkedActivities[activity.id],
+                score: 1.0,
+              ),
+            );
+          } else if (remainingModNames.isNotEmpty) {
+            final (aIdx, aScore) = StringMatcher.findBestMatch(
+              activity.name,
+              remainingModNames,
+            );
+            MoodleModule? actMatched;
+            if (aIdx >= 0 && aScore > 0.3) {
+              actMatched = remainingModules[aIdx];
+              remainingModules.removeAt(aIdx);
+              remainingModNames.removeAt(aIdx);
+            }
+            activityMatches.add(
+              ActivityMatch(
+                local: activity,
+                moodleModule: actMatched,
+                score: aScore,
+              ),
+            );
+          } else {
+            activityMatches.add(
+              ActivityMatch(local: activity, moodleModule: null, score: 0),
+            );
+          }
         }
       } else {
         for (final activity in section.activities) {
@@ -126,105 +194,181 @@ class SyncController extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    try {
-      final totalSteps = _matches.length;
-      int step = 0;
+    final totalSteps = _matches.length;
+    int step = 0;
+    final errors = <String>[];
+    // Flags para pular operações sem permissão após o 1º erro
+    bool canUpdateNames = true;
+    int skippedNameOps = 0;
 
-      for (final match in _matches) {
-        step++;
-        _progress = step / totalSteps;
+    for (final match in _matches) {
+      step++;
+      _progress = step / totalSteps;
 
-        if (match.moodleSection == null) {
-          _progressMessage =
-              'Seção "${match.local.name}" - sem correspondência no Moodle';
-          notifyListeners();
-          continue;
-        }
+      if (match.moodleSection == null) {
+        _progressMessage =
+            'Seção "${match.local.name}" - sem correspondência no Moodle';
+        notifyListeners();
+        continue;
+      }
 
-        // Data de referência para resolver macros da seção
-        final sectionRefDate = config.semesterStartDate.add(
-          Duration(days: match.local.referenceDaysOffset),
-        );
+      // Data de referência para resolver macros da seção
+      final sectionRefDate = config.semesterStartDate.add(
+        Duration(days: match.local.referenceDaysOffset),
+      );
 
-        // Resolver macros no nome da seção antes de enviar ao Moodle
-        final resolvedSectionName = MacroResolver.resolve(
-          match.local.name,
-          config.semesterStartDate,
-          sectionRefDate,
-        );
+      // Resolver macros no nome da seção antes de enviar ao Moodle
+      final resolvedSectionName = MacroResolver.resolve(
+        match.local.name,
+        config.semesterStartDate,
+        sectionRefDate,
+      );
 
-        // Atualizar nome da seção se diferente
-        if (resolvedSectionName != match.moodleSection!.name) {
+      // Atualizar nome da seção se diferente
+      if (resolvedSectionName != match.moodleSection!.name) {
+        if (canUpdateNames) {
           _progressMessage = 'Atualizando seção: $resolvedSectionName';
           notifyListeners();
-          await _repo.updateSectionName(
-            token,
-            baseUrl,
-            match.moodleSection!.id,
-            resolvedSectionName,
-          );
+          try {
+            await _repo.updateSectionName(
+              token,
+              baseUrl,
+              match.moodleSection!.id,
+              resolvedSectionName,
+            );
+          } catch (e) {
+            if (_isAccessError(e)) {
+              canUpdateNames = false;
+              skippedNameOps++;
+            } else {
+              errors.add('Seção "${match.local.name}": $e');
+            }
+          }
+        } else {
+          skippedNameOps++;
         }
+      }
 
-        // Atualizar visibilidade de módulos
-        for (final am in match.activityMatches) {
-          if (am.moodleModule == null) continue;
+      // Atualizar visibilidade e nomes de módulos
+      for (final am in match.activityMatches) {
+        if (am.moodleModule == null) continue;
 
-          // Resolver macros no nome da atividade
-          final resolvedActivityName = MacroResolver.resolve(
-            am.local.name,
-            config.semesterStartDate,
-            sectionRefDate,
-            am.local.computeOpenDate(sectionRefDate),
-            am.local.computeCloseDate(sectionRefDate),
-          );
+        // Resolver macros no nome da atividade
+        final resolvedActivityName = MacroResolver.resolve(
+          am.local.name,
+          config.semesterStartDate,
+          sectionRefDate,
+          am.local.computeOpenDate(sectionRefDate),
+          am.local.computeCloseDate(sectionRefDate),
+        );
 
-          // Atualizar visibilidade se diferente
-          if (am.local.visible != am.moodleModule!.visible) {
-            _progressMessage = 'Visibilidade: $resolvedActivityName';
-            notifyListeners();
+        // Atualizar visibilidade se diferente
+        if (am.local.visible != am.moodleModule!.visible) {
+          _progressMessage = 'Visibilidade: $resolvedActivityName';
+          notifyListeners();
+          try {
             await _repo.updateModuleVisibility(
               token,
               baseUrl,
               am.moodleModule!.id,
               am.local.visible,
             );
+          } catch (e) {
+            errors.add('Visibilidade "${am.local.name}": $e');
           }
+        }
 
-          // Para labels: atualizar nome e conteúdo HTML
-          if (am.local.activityType == 'Área de texto e mídia') {
-            final htmlContent =
-                '<p dir="ltr" style="text-align: left;"></p>'
-                '<p><strong><span class="" style="color: #ef4540;"> '
-                '$resolvedActivityName </span></strong></p>';
+        // Para labels: atualizar nome e conteúdo HTML
+        if (am.local.activityType == 'Área de texto e mídia') {
+          final resolvedHtml =
+              '<p dir="ltr" style="text-align: left;"></p>'
+              '<p><strong><span class="" style="color: #ef4540;"> '
+              '$resolvedActivityName </span></strong></p>';
 
+          if (canUpdateNames) {
             _progressMessage = 'Label: $resolvedActivityName';
             notifyListeners();
+            try {
+              await _repo.updateModuleName(
+                token,
+                baseUrl,
+                am.moodleModule!.id,
+                resolvedActivityName,
+              );
+            } catch (e) {
+              if (_isAccessError(e)) {
+                canUpdateNames = false;
+                skippedNameOps++;
+              } else {
+                errors.add('Nome label "${am.local.name}": $e');
+              }
+            }
 
-            await _repo.updateModuleName(
-              token,
-              baseUrl,
-              am.moodleModule!.id,
-              resolvedActivityName,
-            );
-
-            await _repo.updateLabelContent(
-              token,
-              baseUrl,
-              am.moodleModule!.id,
-              htmlContent,
-            );
+            if (canUpdateNames) {
+              try {
+                await _repo.updateLabelContent(
+                  token,
+                  baseUrl,
+                  am.moodleModule!.id,
+                  resolvedHtml,
+                );
+              } catch (e) {
+                if (_isAccessError(e)) {
+                  canUpdateNames = false;
+                  skippedNameOps++;
+                } else {
+                  errors.add('Conteúdo label "${am.local.name}": $e');
+                }
+              }
+            } else {
+              skippedNameOps++;
+            }
+          } else {
+            skippedNameOps += 2; // nome + conteúdo
           }
         }
       }
-
-      _progressMessage = 'Sincronização concluída!';
-      _progress = 1;
-    } catch (e) {
-      _error = 'Erro na sincronização: $e';
-      _progressMessage = 'Erro!';
     }
+
+    // Construir mensagem final
+    final messages = <String>[];
+    if (skippedNameOps > 0) {
+      messages.add(
+        'Atualização de nomes não disponível ($skippedNameOps operações puladas).\n'
+        'A função "core_update_inplace_editable" não está habilitada '
+        'no serviço web do Moodle.\n\n'
+        'Para habilitar, o administrador do Moodle deve:\n'
+        '1. Ir em Administração > Plugins > Web services > Serviços Externos\n'
+        '2. Adicionar a função "core_update_inplace_editable" ao serviço '
+        '"Serviço do Moodle Mobile" ou criar um serviço chamado '
+        '"config_moodle_service" com essa função.',
+      );
+    }
+    if (errors.isNotEmpty) {
+      messages.add('${errors.length} erro(s):\n${errors.join('\n')}');
+    }
+
+    if (messages.isEmpty) {
+      _progressMessage = 'Sincronização concluída com sucesso!';
+    } else if (errors.isEmpty && skippedNameOps > 0) {
+      _progressMessage = 'Concluída (visibilidade OK, nomes ignorados)';
+    } else {
+      _progressMessage = 'Concluída com problemas';
+    }
+    _progress = 1;
+    _error = messages.isNotEmpty ? messages.join('\n\n') : null;
     _syncing = false;
     notifyListeners();
+  }
+
+  /// Verifica se o erro é de controle de acesso / permissão.
+  bool _isAccessError(Object e) {
+    final msg = e.toString().toLowerCase();
+    return msg.contains('controle de acesso') ||
+        msg.contains('access control') ||
+        msg.contains('accessexception') ||
+        msg.contains('not allowed') ||
+        msg.contains('not available');
   }
 
   void clearMatches() {

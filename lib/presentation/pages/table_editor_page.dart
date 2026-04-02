@@ -1417,7 +1417,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                 final enteredDays = int.tryParse(daysCtrl.text.trim()) ?? 0;
                 final absoluteOffset = isFirst
                     ? enteredDays
-                    : previousSection!.referenceDaysOffset + enteredDays;
+                    : previousSection.referenceDaysOffset + enteredDays;
                 ctrl.updateSection(
                   section.id,
                   name: nameCtrl.text.trim(),

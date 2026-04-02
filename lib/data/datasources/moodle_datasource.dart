@@ -8,16 +8,24 @@ class MoodleDatasource {
     String token,
     String function, {
     Map<String, String> params = const {},
+    bool usePost = false,
   }) async {
-    final uri = Uri.parse('$baseUrl/webservice/rest/server.php').replace(
-      queryParameters: {
-        'wstoken': token,
-        'wsfunction': function,
-        'moodlewsrestformat': 'json',
-        ...params,
-      },
-    );
-    final response = await http.get(uri);
+    final baseParams = {
+      'wstoken': token,
+      'wsfunction': function,
+      'moodlewsrestformat': 'json',
+    };
+
+    late final http.Response response;
+    if (usePost) {
+      final uri = Uri.parse('$baseUrl/webservice/rest/server.php');
+      response = await http.post(uri, body: {...baseParams, ...params});
+    } else {
+      final uri = Uri.parse(
+        '$baseUrl/webservice/rest/server.php',
+      ).replace(queryParameters: {...baseParams, ...params});
+      response = await http.get(uri);
+    }
     if (response.statusCode != 200) {
       throw MoodleException('HTTP ${response.statusCode}');
     }
@@ -28,25 +36,43 @@ class MoodleDatasource {
     return {'data': body};
   }
 
+  /// Serviços externos tentados na ordem: primeiro um serviço personalizado
+  /// com permissões de escrita, depois o serviço mobile padrão.
+  static const _services = [
+    'config_moodle_service', // Serviço externo criado pelo admin com funções de edição
+    'moodle_mobile_app', // Serviço padrão (somente leitura em muitos Moodles)
+  ];
+
   Future<MoodleCredential> login(
-      String baseUrl, String username, String password) async {
-    final uri = Uri.parse('$baseUrl/login/token.php');
-    final response = await http.post(uri, body: {
-      'username': username,
-      'password': password,
-      'service': 'moodle_mobile_app',
-    });
+    String baseUrl,
+    String username,
+    String password,
+  ) async {
+    String? token;
+    String? lastError;
 
-    if (response.statusCode != 200) {
-      throw MoodleException('Falha na conexão com o Moodle');
+    for (final service in _services) {
+      final uri = Uri.parse('$baseUrl/login/token.php');
+      final response = await http.post(
+        uri,
+        body: {'username': username, 'password': password, 'service': service},
+      );
+
+      if (response.statusCode != 200) continue;
+
+      final body = json.decode(response.body) as Map<String, dynamic>;
+      if (body.containsKey('error')) {
+        lastError = body['error'] as String;
+        continue;
+      }
+
+      token = body['token'] as String;
+      break;
     }
 
-    final body = json.decode(response.body) as Map<String, dynamic>;
-    if (body.containsKey('error')) {
-      throw MoodleException(body['error'] as String);
+    if (token == null) {
+      throw MoodleException(lastError ?? 'Falha na conexão com o Moodle');
     }
-
-    final token = body['token'] as String;
 
     // Get user info
     final info = await _callWs(baseUrl, token, 'core_webservice_get_site_info');
@@ -63,7 +89,10 @@ class MoodleDatasource {
   }
 
   Future<List<MoodleCourse>> getCourses(
-      String token, String baseUrl, int userId) async {
+    String token,
+    String baseUrl,
+    int userId,
+  ) async {
     final result = await _callWs(
       baseUrl,
       token,
@@ -77,7 +106,10 @@ class MoodleDatasource {
   }
 
   Future<List<MoodleSection>> getCourseContents(
-      String token, String baseUrl, int courseId) async {
+    String token,
+    String baseUrl,
+    int courseId,
+  ) async {
     final result = await _callWs(
       baseUrl,
       token,
@@ -91,11 +123,16 @@ class MoodleDatasource {
   }
 
   Future<void> updateSectionName(
-      String token, String baseUrl, int sectionId, String newName) async {
+    String token,
+    String baseUrl,
+    int sectionId,
+    String newName,
+  ) async {
     await _callWs(
       baseUrl,
       token,
       'core_update_inplace_editable',
+      usePost: true,
       params: {
         'component': 'core_course',
         'itemtype': 'sectionname',
@@ -106,24 +143,31 @@ class MoodleDatasource {
   }
 
   Future<void> updateModuleVisibility(
-      String token, String baseUrl, int moduleId, bool visible) async {
+    String token,
+    String baseUrl,
+    int moduleId,
+    bool visible,
+  ) async {
     await _callWs(
       baseUrl,
       token,
       'core_course_edit_module',
-      params: {
-        'id': moduleId.toString(),
-        'action': visible ? 'show' : 'hide',
-      },
+      usePost: true,
+      params: {'id': moduleId.toString(), 'action': visible ? 'show' : 'hide'},
     );
   }
 
   Future<void> updateModuleName(
-      String token, String baseUrl, int moduleId, String newName) async {
+    String token,
+    String baseUrl,
+    int moduleId,
+    String newName,
+  ) async {
     await _callWs(
       baseUrl,
       token,
       'core_update_inplace_editable',
+      usePost: true,
       params: {
         'component': 'core_course',
         'itemtype': 'activityname',
@@ -134,11 +178,16 @@ class MoodleDatasource {
   }
 
   Future<void> updateLabelContent(
-      String token, String baseUrl, int moduleId, String htmlContent) async {
+    String token,
+    String baseUrl,
+    int moduleId,
+    String htmlContent,
+  ) async {
     await _callWs(
       baseUrl,
       token,
       'core_update_inplace_editable',
+      usePost: true,
       params: {
         'component': 'mod_label',
         'itemtype': 'content',

@@ -58,10 +58,12 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                             'Faça login no Moodle pela tela inicial primeiro.',
                       )
                     : config == null
-                        ? const Center(
-                            child: CircularProgressIndicator(
-                                color: AppTheme.primary))
-                        : _buildContent(context, auth, configCtrl, syncCtrl),
+                    ? const Center(
+                        child: CircularProgressIndicator(
+                          color: AppTheme.primary,
+                        ),
+                      )
+                    : _buildContent(context, auth, configCtrl, syncCtrl),
               ),
             ],
           ),
@@ -166,8 +168,12 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
     );
   }
 
-  Widget _buildContent(BuildContext context, AuthController auth,
-      ConfigController configCtrl, SyncController syncCtrl) {
+  Widget _buildContent(
+    BuildContext context,
+    AuthController auth,
+    ConfigController configCtrl,
+    SyncController syncCtrl,
+  ) {
     switch (_step) {
       case 0:
         return _buildCourseSelector(context, auth, configCtrl, syncCtrl);
@@ -182,11 +188,16 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
 
   // ── Step 0: Selecionar disciplina ─────────────────────────────────────────
 
-  Widget _buildCourseSelector(BuildContext context, AuthController auth,
-      ConfigController configCtrl, SyncController syncCtrl) {
+  Widget _buildCourseSelector(
+    BuildContext context,
+    AuthController auth,
+    ConfigController configCtrl,
+    SyncController syncCtrl,
+  ) {
     if (syncCtrl.loading) {
       return const Center(
-          child: CircularProgressIndicator(color: AppTheme.primary));
+        child: CircularProgressIndicator(color: AppTheme.primary),
+      );
     }
 
     if (syncCtrl.courses.isEmpty) {
@@ -211,7 +222,10 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
             onTap: () async {
               configCtrl.linkMoodleCourse(course.id, course.fullname);
               await syncCtrl.loadMoodleSections(
-                  auth.token, auth.baseUrl, course.id);
+                auth.token,
+                auth.baseUrl,
+                course.id,
+              );
               syncCtrl.generateMatches(configCtrl.current!);
               setState(() => _step = 1);
             },
@@ -227,8 +241,9 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                   ),
                   child: Icon(
                     Icons.school,
-                    color:
-                        isSelected ? AppTheme.primary : AppTheme.textSecondary,
+                    color: isSelected
+                        ? AppTheme.primary
+                        : AppTheme.textSecondary,
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -246,7 +261,9 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                       Text(
                         course.shortname,
                         style: const TextStyle(
-                            color: AppTheme.textSecondary, fontSize: 12),
+                          color: AppTheme.textSecondary,
+                          fontSize: 12,
+                        ),
                       ),
                     ],
                   ),
@@ -264,8 +281,12 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
 
   // ── Step 1: Preview dos matches ───────────────────────────────────────────
 
-  Widget _buildMatchPreview(BuildContext context, AuthController auth,
-      ConfigController configCtrl, SyncController syncCtrl) {
+  Widget _buildMatchPreview(
+    BuildContext context,
+    AuthController auth,
+    ConfigController configCtrl,
+    SyncController syncCtrl,
+  ) {
     if (syncCtrl.matches.isEmpty) {
       return const EmptyState(
         icon: Icons.compare_arrows,
@@ -324,8 +345,8 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
     final scoreColor = match.score > 0.8
         ? AppTheme.accentGreen
         : match.score > 0.5
-            ? AppTheme.warning
-            : AppTheme.danger;
+        ? AppTheme.warning
+        : AppTheme.danger;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -339,14 +360,19 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('LOCAL',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: AppTheme.textSecondary,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1)),
-                      Text(match.local.name,
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                      const Text(
+                        'LOCAL',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      Text(
+                        match.local.name,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                     ],
                   ),
                 ),
@@ -359,12 +385,15 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('MOODLE',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: AppTheme.textSecondary,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1)),
+                      const Text(
+                        'MOODLE',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.textSecondary,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1,
+                        ),
+                      ),
                       Text(
                         hasMatch
                             ? match.moodleSection!.name
@@ -387,38 +416,45 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
             ),
             if (match.activityMatches.isNotEmpty) ...[
               const Divider(color: AppTheme.divider, height: 20),
-              ...match.activityMatches.map((am) => Padding(
-                    padding: const EdgeInsets.only(left: 16, bottom: 4),
-                    child: Row(
-                      children: [
-                        StatusChip(
-                          label: am.local.activityType,
-                          color: AppTheme.accent,
+              ...match.activityMatches.map(
+                (am) => Padding(
+                  padding: const EdgeInsets.only(left: 16, bottom: 4),
+                  child: Row(
+                    children: [
+                      StatusChip(
+                        label: am.local.activityType,
+                        color: AppTheme.accent,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          am.local.name,
+                          style: const TextStyle(fontSize: 12),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                            child: Text(am.local.name,
-                                style: const TextStyle(fontSize: 12))),
-                        Icon(
-                          am.moodleModule != null
-                              ? Icons.check_circle_outline
-                              : Icons.help_outline,
-                          size: 16,
-                          color: am.moodleModule != null
-                              ? AppTheme.accentGreen
-                              : AppTheme.warning,
-                        ),
-                        if (am.moodleModule != null) ...[
-                          const SizedBox(width: 4),
-                          Text(
-                            '${(am.score * 100).toStringAsFixed(0)}%',
-                            style: const TextStyle(
-                                fontSize: 11, color: AppTheme.textSecondary),
+                      ),
+                      Icon(
+                        am.moodleModule != null
+                            ? Icons.check_circle_outline
+                            : Icons.help_outline,
+                        size: 16,
+                        color: am.moodleModule != null
+                            ? AppTheme.accentGreen
+                            : AppTheme.warning,
+                      ),
+                      if (am.moodleModule != null) ...[
+                        const SizedBox(width: 4),
+                        Text(
+                          '${(am.score * 100).toStringAsFixed(0)}%',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppTheme.textSecondary,
                           ),
-                        ],
+                        ),
                       ],
-                    ),
-                  )),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ],
         ),
@@ -428,10 +464,14 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
 
   // ── Step 2: Progresso da sincronização ────────────────────────────────────
 
-  Widget _buildSyncProgress(BuildContext context, AuthController auth,
-      ConfigController configCtrl, SyncController syncCtrl) {
+  Widget _buildSyncProgress(
+    BuildContext context,
+    AuthController auth,
+    ConfigController configCtrl,
+    SyncController syncCtrl,
+  ) {
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(40),
         child: GlassCard(
           padding: const EdgeInsets.all(32),
@@ -447,11 +487,11 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
               else
                 Icon(
                   syncCtrl.error != null
-                      ? Icons.error_outline
+                      ? Icons.warning_amber_rounded
                       : Icons.check_circle,
                   size: 60,
                   color: syncCtrl.error != null
-                      ? AppTheme.danger
+                      ? Colors.orange
                       : AppTheme.accentGreen,
                 ),
               const SizedBox(height: 24),
@@ -481,10 +521,18 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
               ),
               if (syncCtrl.error != null) ...[
                 const SizedBox(height: 12),
-                Text(
-                  syncCtrl.error!,
-                  style: const TextStyle(color: AppTheme.danger, fontSize: 13),
-                  textAlign: TextAlign.center,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      syncCtrl.error!,
+                      style: const TextStyle(
+                        color: AppTheme.danger,
+                        fontSize: 13,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
                 ),
               ],
               if (!syncCtrl.syncing) ...[

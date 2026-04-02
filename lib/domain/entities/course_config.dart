@@ -23,8 +23,8 @@ class CourseConfig {
 
   CourseConfig copyWith({
     String? name,
-    int? moodleCourseId,
-    String? moodleCourseName,
+    Object? moodleCourseId = _sentinel,
+    Object? moodleCourseName = _sentinel,
     DateTime? semesterStartDate,
     DateTime? updatedAt,
     List<SectionEntry>? sections,
@@ -32,8 +32,12 @@ class CourseConfig {
     return CourseConfig(
       id: id,
       name: name ?? this.name,
-      moodleCourseId: moodleCourseId ?? this.moodleCourseId,
-      moodleCourseName: moodleCourseName ?? this.moodleCourseName,
+      moodleCourseId: moodleCourseId == _sentinel
+          ? this.moodleCourseId
+          : moodleCourseId as int?,
+      moodleCourseName: moodleCourseName == _sentinel
+          ? this.moodleCourseName
+          : moodleCourseName as String?,
       semesterStartDate: semesterStartDate ?? this.semesterStartDate,
       createdAt: createdAt,
       updatedAt: updatedAt ?? DateTime.now(),
@@ -42,29 +46,30 @@ class CourseConfig {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'moodleCourseId': moodleCourseId,
-        'moodleCourseName': moodleCourseName,
-        'semesterStartDate': semesterStartDate.toIso8601String(),
-        'createdAt': createdAt.toIso8601String(),
-        'updatedAt': updatedAt.toIso8601String(),
-        'sections': sections.map((s) => s.toJson()).toList(),
-      };
+    'id': id,
+    'name': name,
+    'moodleCourseId': moodleCourseId,
+    'moodleCourseName': moodleCourseName,
+    'semesterStartDate': semesterStartDate.toIso8601String(),
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+    'sections': sections.map((s) => s.toJson()).toList(),
+  };
 
   factory CourseConfig.fromJson(Map<String, dynamic> json) => CourseConfig(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        moodleCourseId: json['moodleCourseId'] as int?,
-        moodleCourseName: json['moodleCourseName'] as String?,
-        semesterStartDate: DateTime.parse(json['semesterStartDate'] as String),
-        createdAt: DateTime.parse(json['createdAt'] as String),
-        updatedAt: DateTime.parse(json['updatedAt'] as String),
-        sections: (json['sections'] as List?)
-                ?.map((s) => SectionEntry.fromJson(s as Map<String, dynamic>))
-                .toList() ??
-            [],
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    moodleCourseId: json['moodleCourseId'] as int?,
+    moodleCourseName: json['moodleCourseName'] as String?,
+    semesterStartDate: DateTime.parse(json['semesterStartDate'] as String),
+    createdAt: DateTime.parse(json['createdAt'] as String),
+    updatedAt: DateTime.parse(json['updatedAt'] as String),
+    sections:
+        (json['sections'] as List?)
+            ?.map((s) => SectionEntry.fromJson(s as Map<String, dynamic>))
+            .toList() ??
+        [],
+  );
 }
 
 class SectionEntry {
@@ -98,10 +103,10 @@ class SectionEntry {
     int? referenceDaysOffset,
     DateTime? date,
     int? offsetDays,
-    int? moodleSectionId,
+    Object? moodleSectionId = _sentinel,
     bool? visible,
     List<ActivityEntry>? activities,
-    String? moodleDescription,
+    Object? moodleDescription = _sentinel,
   }) {
     return SectionEntry(
       id: id,
@@ -110,41 +115,46 @@ class SectionEntry {
       referenceDaysOffset: referenceDaysOffset ?? this.referenceDaysOffset,
       date: date ?? this.date,
       offsetDays: offsetDays ?? this.offsetDays,
-      moodleSectionId: moodleSectionId ?? this.moodleSectionId,
+      moodleSectionId: moodleSectionId == _sentinel
+          ? this.moodleSectionId
+          : moodleSectionId as int?,
       visible: visible ?? this.visible,
       activities: activities ?? this.activities,
-      moodleDescription: moodleDescription ?? this.moodleDescription,
+      moodleDescription: moodleDescription == _sentinel
+          ? this.moodleDescription
+          : moodleDescription as String?,
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'orderIndex': orderIndex,
-        'name': name,
-        'referenceDaysOffset': referenceDaysOffset,
-        'date': date.toIso8601String(),
-        'offsetDays': offsetDays,
-        'moodleSectionId': moodleSectionId,
-        'visible': visible,
-        'activities': activities.map((a) => a.toJson()).toList(),
-        'moodleDescription': moodleDescription,
-      };
+    'id': id,
+    'orderIndex': orderIndex,
+    'name': name,
+    'referenceDaysOffset': referenceDaysOffset,
+    'date': date.toIso8601String(),
+    'offsetDays': offsetDays,
+    'moodleSectionId': moodleSectionId,
+    'visible': visible,
+    'activities': activities.map((a) => a.toJson()).toList(),
+    'moodleDescription': moodleDescription,
+  };
 
   factory SectionEntry.fromJson(Map<String, dynamic> json) => SectionEntry(
-        id: json['id'] as String,
-        orderIndex: json['orderIndex'] as int,
-        name: json['name'] as String,
-        referenceDaysOffset: json['referenceDaysOffset'] as int? ?? 0,
-        date: DateTime.parse(json['date'] as String),
-        offsetDays: json['offsetDays'] as int,
-        moodleSectionId: json['moodleSectionId'] as int?,
-        visible: json['visible'] as bool? ?? true,
-        activities: (json['activities'] as List?)
-                ?.map((a) => ActivityEntry.fromJson(a as Map<String, dynamic>))
-                .toList() ??
-            [],
-        moodleDescription: json['moodleDescription'] as String?,
-      );
+    id: json['id'] as String,
+    orderIndex: json['orderIndex'] as int,
+    name: json['name'] as String,
+    referenceDaysOffset: json['referenceDaysOffset'] as int? ?? 0,
+    date: DateTime.parse(json['date'] as String),
+    offsetDays: json['offsetDays'] as int,
+    moodleSectionId: json['moodleSectionId'] as int?,
+    visible: json['visible'] as bool? ?? true,
+    activities:
+        (json['activities'] as List?)
+            ?.map((a) => ActivityEntry.fromJson(a as Map<String, dynamic>))
+            .toList() ??
+        [],
+    moodleDescription: json['moodleDescription'] as String?,
+  );
 }
 
 class ActivityEntry {
@@ -179,8 +189,13 @@ class ActivityEntry {
     if (openOffsetDays == null) return null;
     final d = sectionRefDate.add(Duration(days: openOffsetDays!));
     if (openTimeMinutes != null) {
-      return DateTime(d.year, d.month, d.day, openTimeMinutes! ~/ 60,
-          openTimeMinutes! % 60);
+      return DateTime(
+        d.year,
+        d.month,
+        d.day,
+        openTimeMinutes! ~/ 60,
+        openTimeMinutes! % 60,
+      );
     }
     return d;
   }
@@ -190,8 +205,13 @@ class ActivityEntry {
     if (closeOffsetDays == null) return null;
     final d = sectionRefDate.add(Duration(days: closeOffsetDays!));
     if (closeTimeMinutes != null) {
-      return DateTime(d.year, d.month, d.day, closeTimeMinutes! ~/ 60,
-          closeTimeMinutes! % 60);
+      return DateTime(
+        d.year,
+        d.month,
+        d.day,
+        closeTimeMinutes! ~/ 60,
+        closeTimeMinutes! % 60,
+      );
     }
     return d;
   }
@@ -213,8 +233,9 @@ class ActivityEntry {
       name: name ?? this.name,
       activityType: activityType ?? this.activityType,
       openDate: openDate == _sentinel ? this.openDate : openDate as DateTime?,
-      closeDate:
-          closeDate == _sentinel ? this.closeDate : closeDate as DateTime?,
+      closeDate: closeDate == _sentinel
+          ? this.closeDate
+          : closeDate as DateTime?,
       openOffsetDays: openOffsetDays == _sentinel
           ? this.openOffsetDays
           : openOffsetDays as int?,
@@ -235,34 +256,34 @@ class ActivityEntry {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'activityType': activityType,
-        'openDate': openDate?.toIso8601String(),
-        'closeDate': closeDate?.toIso8601String(),
-        'openOffsetDays': openOffsetDays,
-        'closeOffsetDays': closeOffsetDays,
-        'openTimeMinutes': openTimeMinutes,
-        'closeTimeMinutes': closeTimeMinutes,
-        'moodleModuleId': moodleModuleId,
-        'visible': visible,
-      };
+    'id': id,
+    'name': name,
+    'activityType': activityType,
+    'openDate': openDate?.toIso8601String(),
+    'closeDate': closeDate?.toIso8601String(),
+    'openOffsetDays': openOffsetDays,
+    'closeOffsetDays': closeOffsetDays,
+    'openTimeMinutes': openTimeMinutes,
+    'closeTimeMinutes': closeTimeMinutes,
+    'moodleModuleId': moodleModuleId,
+    'visible': visible,
+  };
 
   factory ActivityEntry.fromJson(Map<String, dynamic> json) => ActivityEntry(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        activityType: json['activityType'] as String,
-        openDate: json['openDate'] != null
-            ? DateTime.parse(json['openDate'] as String)
-            : null,
-        closeDate: json['closeDate'] != null
-            ? DateTime.parse(json['closeDate'] as String)
-            : null,
-        openOffsetDays: json['openOffsetDays'] as int?,
-        closeOffsetDays: json['closeOffsetDays'] as int?,
-        openTimeMinutes: json['openTimeMinutes'] as int?,
-        closeTimeMinutes: json['closeTimeMinutes'] as int?,
-        moodleModuleId: json['moodleModuleId'] as int?,
-        visible: json['visible'] as bool? ?? true,
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    activityType: json['activityType'] as String,
+    openDate: json['openDate'] != null
+        ? DateTime.parse(json['openDate'] as String)
+        : null,
+    closeDate: json['closeDate'] != null
+        ? DateTime.parse(json['closeDate'] as String)
+        : null,
+    openOffsetDays: json['openOffsetDays'] as int?,
+    closeOffsetDays: json['closeOffsetDays'] as int?,
+    openTimeMinutes: json['openTimeMinutes'] as int?,
+    closeTimeMinutes: json['closeTimeMinutes'] as int?,
+    moodleModuleId: json['moodleModuleId'] as int?,
+    visible: json['visible'] as bool? ?? true,
+  );
 }
