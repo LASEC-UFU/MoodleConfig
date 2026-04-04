@@ -36,10 +36,7 @@ class GlassCard extends StatelessWidget {
     if (onTap != null) {
       return MouseRegion(
         cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: onTap,
-          child: content,
-        ),
+        child: GestureDetector(onTap: onTap, child: content),
       );
     }
     return content;
@@ -91,16 +88,17 @@ class GradientButton extends StatelessWidget {
               children: [
                 if (icon != null) ...[
                   Icon(icon, color: Colors.white, size: compact ? 18 : 20),
-                  const SizedBox(width: 8),
+                  if (label.isNotEmpty) const SizedBox(width: 8),
                 ],
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: compact ? 13 : 14,
+                if (label.isNotEmpty)
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: compact ? 13 : 14,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
@@ -193,10 +191,7 @@ class EmptyState extends StatelessWidget {
                 fontSize: 14,
               ),
             ),
-            if (action != null) ...[
-              const SizedBox(height: 24),
-              action!,
-            ],
+            if (action != null) ...[const SizedBox(height: 24), action!],
           ],
         ),
       ),

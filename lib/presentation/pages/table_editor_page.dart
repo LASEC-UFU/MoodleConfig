@@ -12,10 +12,16 @@ import 'package:config_moodle/presentation/controllers/sync_controller.dart';
 import 'package:config_moodle/core/utils/macro_resolver.dart';
 import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 import 'package:config_moodle/presentation/widgets/inline_edit_text.dart';
+import 'package:config_moodle/presentation/widgets/inline_link_picker.dart';
 
 class TableEditorPage extends StatefulWidget {
   final String courseConfigId;
-  const TableEditorPage({super.key, required this.courseConfigId});
+  final bool autoEvaluate;
+  const TableEditorPage({
+    super.key,
+    required this.courseConfigId,
+    this.autoEvaluate = false,
+  });
 
   @override
   State<TableEditorPage> createState() => _TableEditorPageState();
@@ -26,10 +32,12 @@ class _TableEditorPageState extends State<TableEditorPage> {
   final _dfh = DateFormat('dd/MM/yyyy HH:mm');
   final _scrollController = ScrollController();
   String? _hoveringSectionId;
-  bool _allExpanded = false;
+  bool _allExpanded = true;
   int _expandToggleKey = 0;
   bool _isDraggingSelection = false;
   String? _hoveringActivityId;
+  bool _evaluated = false;
+  bool _evaluating = false;
 
   static const _typesWithTime = {
     'Tarefa',
@@ -88,6 +96,21 @@ class _TableEditorPageState extends State<TableEditorPage> {
             auth.baseUrl,
             config.moodleCourseId!,
           );
+        }
+        // Auto-avaliar quando voltando da sincronização
+        if (widget.autoEvaluate) {
+          await sync.loadMoodleSections(
+            auth.token,
+            auth.baseUrl,
+            config.moodleCourseId!,
+          );
+          sync.generateMatches(ctrl.current ?? config);
+          if (mounted) {
+            setState(() {
+              _evaluated = true;
+              _evaluating = false;
+            });
+          }
         }
       }
     });
@@ -216,17 +239,129 @@ class _TableEditorPageState extends State<TableEditorPage> {
           if (config != null && auth.isLoggedIn) ...[
             _buildCourseChip(context, config, ctrl, auth),
             const SizedBox(width: 8),
-            GradientButton(
-              label: 'Sincronizar',
-              icon: Icons.sync,
-              compact: true,
-              gradient: AppTheme.accentGradient,
-              onPressed: () => context.push('/sync/${config.id}'),
+            if (_evaluating)
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppTheme.accent,
+                ),
+              )
+            else ...[
+              Tooltip(
+                message: 'Desvincular Todos',
+                child: GradientButton(
+                  icon: Icons.link_off,
+                  label: '',
+                  compact: true,
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFEF5350), Color(0xFFE53935)],
+                  ),
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('Desvincular Todos'),
+                        content: const Text(
+                          'Remover todos os v\u00ednculos Moodle (se\u00e7\u00f5es e atividades)?',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Cancelar'),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.danger,
+                            ),
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Desvincular'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true && mounted) {
+                      await ctrl.unlinkAll();
+                      setState(() => _evaluated = false);
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              Tooltip(
+                message: 'Avaliar',
+                child: GradientButton(
+                  icon: Icons.fact_check_outlined,
+                  label: '',
+                  compact: true,
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF42A5F5), Color(0xFF1E88E5)],
+                  ),
+                  onPressed: () => _runEvaluation(config, auth),
+                ),
+              ),
+            ],
+            const SizedBox(width: 8),
+            Opacity(
+              opacity: _evaluated ? 1.0 : 0.4,
+              child: Tooltip(
+                message: 'Sincronizar',
+                child: GradientButton(
+                  icon: Icons.sync,
+                  label: '',
+                  compact: true,
+                  gradient: AppTheme.accentGradient,
+                  onPressed: _evaluated ? () => _runSync(config, auth) : null,
+                ),
+              ),
             ),
           ],
         ],
       ),
     );
+  }
+
+  Future<void> _runEvaluation(CourseConfig config, AuthController auth) async {
+    if (config.moodleCourseId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Vincule esta configuração a uma disciplina primeiro.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    setState(() => _evaluating = true);
+    try {
+      final sync = context.read<SyncController>();
+      await sync.loadMoodleSections(
+        auth.token,
+        auth.baseUrl,
+        config.moodleCourseId!,
+      );
+      sync.generateMatches(config);
+      if (mounted) {
+        setState(() {
+          _evaluated = true;
+          _evaluating = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _evaluating = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erro ao avaliar: $e')));
+      }
+    }
+  }
+
+  void _runSync(CourseConfig config, AuthController auth) {
+    context.push('/sync/${config.id}');
   }
 
   Widget _buildCourseChip(
@@ -441,6 +576,76 @@ class _TableEditorPageState extends State<TableEditorPage> {
     );
   }
 
+  SectionMatch? _findSectionMatch(String sectionId) {
+    if (!_evaluated) return null;
+    final sync = context.read<SyncController>();
+    for (final m in sync.matches) {
+      if (m.local.id == sectionId) return m;
+    }
+    return null;
+  }
+
+  ActivityMatch? _findActivityMatch(String sectionId, String activityId) {
+    final sm = _findSectionMatch(sectionId);
+    if (sm == null) return null;
+    for (final am in sm.activityMatches) {
+      if (am.local.id == activityId) return am;
+    }
+    return null;
+  }
+
+  Widget _buildMatchChip(
+    double score, {
+    bool small = false,
+    double linkScore = 0,
+    double nameScore = 0,
+    double posScore = 0,
+    bool hasMatch = true,
+  }) {
+    final pct = (score * 100).toStringAsFixed(0);
+    final color = score >= 0.8
+        ? AppTheme.accentGreen
+        : score > 0.5
+        ? AppTheme.warning
+        : AppTheme.danger;
+    final icon = score >= 0.8
+        ? Icons.check_circle
+        : score > 0
+        ? Icons.warning_amber_rounded
+        : Icons.help_outline;
+
+    // Montar hint com os fatores
+    final String tooltip;
+    if (!hasMatch) {
+      tooltip = 'Módulo não encontrado no Moodle';
+    } else {
+      final hints = <String>[];
+      if (linkScore < 1.0) hints.add('Vínculo');
+      if (nameScore < 1.0) hints.add('Nome');
+      if (posScore < 1.0) hints.add('Posição');
+      tooltip = hints.isEmpty ? 'Tudo OK' : 'Pendente: ${hints.join(', ')}';
+    }
+
+    return Tooltip(
+      message: tooltip,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: small ? 14 : 16, color: color),
+          const SizedBox(width: 2),
+          Text(
+            '$pct%',
+            style: TextStyle(
+              fontSize: small ? 10 : 11,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSectionsList(
     BuildContext context,
     CourseConfig config,
@@ -599,43 +804,136 @@ class _TableEditorPageState extends State<TableEditorPage> {
                       ctrl.updateSection(section.id, name: macroName);
                     },
                   ),
-                  subtitle: Row(
-                    children: [
-                      if (isLinked) ...[
-                        Icon(Icons.link, size: 12, color: AppTheme.accentGreen),
-                        const SizedBox(width: 4),
-                      ],
-                      Icon(
-                        Icons.calendar_today,
-                        size: 12,
-                        color: AppTheme.textSecondary,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _df.format(
-                          semesterStart.add(
-                            Duration(days: section.referenceDaysOffset),
+                  subtitle: Builder(
+                    builder: (_) {
+                      final sync = context.read<SyncController>();
+                      String? moodleSectionName;
+                      if (isLinked) {
+                        for (final ms in sync.moodleSections) {
+                          if (ms.id == section.moodleSectionId) {
+                            moodleSectionName = ms.name;
+                            break;
+                          }
+                        }
+                      }
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          InkWell(
+                            onTap: () => _showSectionLinkPicker(
+                              context,
+                              section,
+                              ctrl,
+                              sync,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.link,
+                                  size: 13,
+                                  color: isLinked
+                                      ? AppTheme.accentGreen
+                                      : AppTheme.textSecondary.withAlpha(100),
+                                ),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    isLinked
+                                        ? (moodleSectionName ??
+                                              'ID: ${section.moodleSectionId}')
+                                        : 'Sem vínculo — toque para vincular',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isLinked
+                                          ? AppTheme.textSecondary
+                                          : AppTheme.textSecondary.withAlpha(
+                                              100,
+                                            ),
+                                      fontStyle: isLinked
+                                          ? FontStyle.normal
+                                          : FontStyle.italic,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (isLinked)
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 4),
+                                    child: InkWell(
+                                      onTap: () => ctrl.linkSectionToMoodle(
+                                        section.id,
+                                        null,
+                                      ),
+                                      child: const Icon(
+                                        Icons.close,
+                                        size: 12,
+                                        color: AppTheme.danger,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                      if (section.referenceDaysOffset != 0) ...[
-                        const SizedBox(width: 8),
-                        StatusChip(
-                          label: previousSection == null
-                              ? '+${section.referenceDaysOffset}d'
-                              : '+${section.referenceDaysOffset - previousSection.referenceDaysOffset}d',
-                          color: AppTheme.accent,
-                        ),
-                      ],
-                    ],
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.calendar_today,
+                                size: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _df.format(
+                                  semesterStart.add(
+                                    Duration(days: section.referenceDaysOffset),
+                                  ),
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.textSecondary,
+                                ),
+                              ),
+                              if (section.referenceDaysOffset != 0) ...[
+                                const SizedBox(width: 8),
+                                StatusChip(
+                                  label: previousSection == null
+                                      ? '+${section.referenceDaysOffset}d'
+                                      : '+${section.referenceDaysOffset - previousSection.referenceDaysOffset}d',
+                                  color: AppTheme.accent,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      );
+                    },
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (_evaluated) ...[
+                        Builder(
+                          builder: (_) {
+                            final sm = _findSectionMatch(section.id);
+                            if (sm == null) {
+                              return const Icon(
+                                Icons.help_outline,
+                                size: 16,
+                                color: AppTheme.danger,
+                              );
+                            }
+                            return _buildMatchChip(
+                              sm.score,
+                              linkScore: sm.linkScore,
+                              nameScore: sm.nameScore,
+                              posScore: sm.posScore,
+                              hasMatch: sm.moodleSection != null,
+                            );
+                          },
+                        ),
+                        const SizedBox(width: 4),
+                      ],
                       IconButton(
                         icon: Icon(
                           section.visible
@@ -653,7 +951,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                       ),
                       IconButton(
                         icon: const Icon(
-                          Icons.edit_outlined,
+                          Icons.calendar_month_outlined,
                           color: AppTheme.accentGreen,
                           size: 20,
                         ),
@@ -912,6 +1210,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
           ? const EdgeInsets.symmetric(horizontal: 4, vertical: 2)
           : null,
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           if (!hasSelection)
             ReorderableDragStartListener(
@@ -938,52 +1237,145 @@ class _TableEditorPageState extends State<TableEditorPage> {
               ),
             ),
           const SizedBox(width: 4),
-          if (activity.moodleModuleId != null)
-            Tooltip(
-              message: 'Moodle ID: ${activity.moodleModuleId}',
-              child: const Icon(
-                Icons.link,
-                size: 14,
-                color: AppTheme.accentGreen,
-              ),
-            )
-          else
-            const Icon(Icons.link_off, size: 14, color: AppTheme.textSecondary),
-          const SizedBox(width: 6),
-          StatusChip(
-            label: activity.activityType,
-            color: _activityColor(activity.activityType),
-          ),
-          const SizedBox(width: 10),
           Expanded(
-            child: InlineEditText(
-              text: MacroResolver.resolve(
-                activity.name,
-                sectionRefDate,
-                null,
-                activity.computeOpenDate(sectionRefDate),
-                activity.computeCloseDate(sectionRefDate),
-              ),
-              editText: activity.name,
-              style: TextStyle(
-                color: activity.visible
-                    ? AppTheme.textPrimary
-                    : AppTheme.textSecondary,
-                fontSize: 13,
-                decoration: activity.visible
-                    ? null
-                    : TextDecoration.lineThrough,
-              ),
-              onChanged: (newName) {
-                final openDate = activity.computeOpenDate(sectionRefDate);
-                final closeDate = activity.computeCloseDate(sectionRefDate);
-                final macroName = MacroResolver.replaceDatesWithMacros(
-                  newName,
-                  sectionRefDate,
-                  activityOpenDate: openDate,
-                  activityCloseDate: closeDate,
+            child: Builder(
+              builder: (_) {
+                final sync = context.read<SyncController>();
+                final isActivityLinked = activity.moodleModuleId != null;
+                String? moodleModName;
+                if (isActivityLinked) {
+                  for (final sec in sync.moodleSections) {
+                    for (final mod in sec.modules) {
+                      if (mod.id == activity.moodleModuleId) {
+                        moodleModName = mod.name;
+                        break;
+                      }
+                    }
+                    if (moodleModName != null) break;
+                  }
+                  // Fallback to stored name when offline
+                  moodleModName ??= activity.moodleModuleName;
+                }
+
+                // Build available link options (unlinked modules only)
+                final config = ctrl.current;
+                final usedIds = <int>{};
+                if (config != null) {
+                  for (final s in config.sections) {
+                    for (final a in s.activities) {
+                      if (a.id != activity.id && a.moodleModuleId != null) {
+                        usedIds.add(a.moodleModuleId!);
+                      }
+                    }
+                  }
+                }
+                final linkOptions = <LinkOption>[];
+                for (final sec in sync.moodleSections) {
+                  for (final mod in sec.modules) {
+                    if (!usedIds.contains(mod.id)) {
+                      linkOptions.add(
+                        LinkOption(
+                          id: mod.id,
+                          label: mod.name,
+                          subtitle:
+                              '${_modnameToType[mod.modname] ?? mod.modname} • ${sec.name}',
+                        ),
+                      );
+                    }
+                  }
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    InlineEditText(
+                      text: MacroResolver.resolve(
+                        activity.name,
+                        sectionRefDate,
+                        null,
+                        activity.computeOpenDate(sectionRefDate),
+                        activity.computeCloseDate(sectionRefDate),
+                      ),
+                      editText: activity.name,
+                      style: TextStyle(
+                        color: activity.visibility == 1
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary,
+                        fontSize: 13,
+                        decoration: activity.visibility == 0
+                            ? TextDecoration.lineThrough
+                            : null,
+                      ),
+                      onChanged: (newName) {
+                        final openDate = activity.computeOpenDate(
+                          sectionRefDate,
+                        );
+                        final closeDate = activity.computeCloseDate(
+                          sectionRefDate,
+                        );
+                        final macroName = MacroResolver.replaceDatesWithMacros(
+                          newName,
+                          sectionRefDate,
+                          activityOpenDate: openDate,
+                          activityCloseDate: closeDate,
+                        );
+                        ctrl.updateActivity(
+                          sectionId,
+                          activity.id,
+                          name: macroName,
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        if (isActivityLinked &&
+                            activity.activityType.isNotEmpty) ...[
+                          StatusChip(
+                            label: activity.activityType,
+                            color: _activityColor(activity.activityType),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Expanded(
+                          child: InlineLinkPicker(
+                            currentId: activity.moodleModuleId,
+                            currentLabel: moodleModName,
+                            isLinked: isActivityLinked,
+                            options: linkOptions,
+                            onChanged: (newId) {
+                              String? type;
+                              String? modName;
+                              if (newId != null) {
+                                for (final sec in sync.moodleSections) {
+                                  for (final mod in sec.modules) {
+                                    if (mod.id == newId) {
+                                      type =
+                                          _modnameToType[mod.modname] ??
+                                          mod.modname;
+                                      modName = mod.name;
+                                      break;
+                                    }
+                                  }
+                                  if (type != null) break;
+                                }
+                              }
+                              ctrl.updateActivity(
+                                sectionId,
+                                activity.id,
+                                moodleModuleId: newId,
+                                type: newId == null ? '' : type,
+                                moodleModuleName: newId == null
+                                    ? null
+                                    : modName,
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 );
-                ctrl.updateActivity(sectionId, activity.id, name: macroName);
               },
             ),
           ),
@@ -1015,23 +1407,57 @@ class _TableEditorPageState extends State<TableEditorPage> {
               ),
             ],
           ],
+          if (_evaluated) ...[
+            const SizedBox(width: 4),
+            Builder(
+              builder: (_) {
+                final am = _findActivityMatch(sectionId, activity.id);
+                if (am == null) {
+                  return const Icon(
+                    Icons.help_outline,
+                    size: 14,
+                    color: AppTheme.danger,
+                  );
+                }
+                return _buildMatchChip(
+                  am.score,
+                  small: true,
+                  linkScore: am.linkScore,
+                  nameScore: am.nameScore,
+                  posScore: am.posScore,
+                  hasMatch: am.moodleModule != null,
+                );
+              },
+            ),
+          ],
           IconButton(
             icon: Icon(
-              activity.visible ? Icons.visibility : Icons.visibility_off,
+              switch (activity.visibility) {
+                0 => Icons.visibility_off,
+                2 => Icons.link,
+                _ => Icons.visibility,
+              },
               size: 16,
-              color: activity.visible
-                  ? AppTheme.accentGreen
-                  : AppTheme.textSecondary,
+              color: switch (activity.visibility) {
+                0 => AppTheme.textSecondary,
+                2 => AppTheme.accent,
+                _ => AppTheme.accentGreen,
+              },
             ),
+            tooltip: switch (activity.visibility) {
+              0 => 'Oculto na página',
+              2 => 'Disponível via link',
+              _ => 'Visível na página',
+            },
             onPressed: () => ctrl.updateActivity(
               sectionId,
               activity.id,
-              visible: !activity.visible,
+              visibility: (activity.visibility + 1) % 3,
             ),
           ),
           IconButton(
             icon: const Icon(
-              Icons.edit_outlined,
+              Icons.calendar_month_outlined,
               size: 16,
               color: AppTheme.accent,
             ),
@@ -1077,7 +1503,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
         data: {'fromSectionId': sectionId, 'activityId': activity.id},
         onDragStarted: () => setState(() => _isDraggingSelection = true),
         onDragEnd: (_) => setState(() => _isDraggingSelection = false),
-        onDraggableCanceled: (_, __) =>
+        onDraggableCanceled: (_, _) =>
             setState(() => _isDraggingSelection = false),
         feedback: Material(
           color: Colors.transparent,
@@ -1299,20 +1725,6 @@ class _TableEditorPageState extends State<TableEditorPage> {
         : section.referenceDaysOffset - previousSection.referenceDaysOffset;
     final daysCtrl = TextEditingController(text: displayOffset.toString());
 
-    final sync = context.read<SyncController>();
-    final hasMoodleData = sync.moodleSections.isNotEmpty;
-    int? selectedMoodleSectionId = section.moodleSectionId;
-    String? selectedMoodleSectionName;
-
-    if (selectedMoodleSectionId != null && hasMoodleData) {
-      for (final ms in sync.moodleSections) {
-        if (ms.id == selectedMoodleSectionId) {
-          selectedMoodleSectionName = ms.name;
-          break;
-        }
-      }
-    }
-
     showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
@@ -1338,72 +1750,6 @@ class _TableEditorPageState extends State<TableEditorPage> {
                   ),
                   keyboardType: TextInputType.number,
                 ),
-                if (hasMoodleData) ...[
-                  const SizedBox(height: 16),
-                  InkWell(
-                    onTap: () async {
-                      final result = await _showMoodleSectionPicker(
-                        ctx,
-                        sync.moodleSections,
-                        selectedMoodleSectionId,
-                      );
-                      if (result != null) {
-                        setState(() {
-                          selectedMoodleSectionId = result.id;
-                          selectedMoodleSectionName = result.name;
-                        });
-                      }
-                    },
-                    child: InputDecorator(
-                      decoration: InputDecoration(
-                        labelText: 'Seção Moodle',
-                        suffixIcon: selectedMoodleSectionId != null
-                            ? IconButton(
-                                icon: const Icon(
-                                  Icons.close,
-                                  size: 18,
-                                  color: AppTheme.danger,
-                                ),
-                                onPressed: () => setState(() {
-                                  selectedMoodleSectionId = null;
-                                  selectedMoodleSectionName = null;
-                                }),
-                              )
-                            : const Icon(Icons.arrow_drop_down),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            selectedMoodleSectionId != null
-                                ? Icons.link
-                                : Icons.link_off,
-                            size: 18,
-                            color: selectedMoodleSectionId != null
-                                ? AppTheme.accentGreen
-                                : AppTheme.textSecondary,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              selectedMoodleSectionId != null
-                                  ? (selectedMoodleSectionName ??
-                                        'ID: $selectedMoodleSectionId')
-                                  : 'Selecionar seção...',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: selectedMoodleSectionId != null
-                                    ? AppTheme.textPrimary
-                                    : AppTheme.textSecondary,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
@@ -1423,7 +1769,6 @@ class _TableEditorPageState extends State<TableEditorPage> {
                   name: nameCtrl.text.trim(),
                   referenceDaysOffset: absoluteOffset,
                 );
-                ctrl.linkSectionToMoodle(section.id, selectedMoodleSectionId);
                 Navigator.pop(context);
               },
               child: const Text('Salvar'),
@@ -1494,11 +1839,6 @@ class _TableEditorPageState extends State<TableEditorPage> {
     String type = 'Tarefa';
     int? openTimeMinutes;
     int? closeTimeMinutes;
-    int? selectedMoodleId;
-    String? selectedMoodleName;
-
-    final sync = context.read<SyncController>();
-    final hasMoodleData = sync.moodleSections.isNotEmpty;
 
     showDialog(
       context: context,
@@ -1529,32 +1869,13 @@ class _TableEditorPageState extends State<TableEditorPage> {
                       autofocus: true,
                     ),
                     const SizedBox(height: 12),
-                    if (hasMoodleData)
-                      _buildMoodleModuleField(
-                        ctx,
-                        sync,
-                        selectedMoodleId,
-                        selectedMoodleName,
-                        type,
-                        (mod) => setState(() {
-                          selectedMoodleId = mod.id;
-                          selectedMoodleName = mod.name;
-                          final mappedType = _modnameToType[mod.modname];
-                          if (mappedType != null) type = mappedType;
-                        }),
-                        () => setState(() {
-                          selectedMoodleId = null;
-                          selectedMoodleName = null;
-                        }),
-                      )
-                    else
-                      DropdownButtonFormField<String>(
-                        initialValue: type,
-                        decoration: const InputDecoration(labelText: 'Tipo'),
-                        dropdownColor: AppTheme.bgSurface,
-                        items: _activityTypes,
-                        onChanged: (v) => setState(() => type = v!),
-                      ),
+                    DropdownButtonFormField<String>(
+                      initialValue: type,
+                      decoration: const InputDecoration(labelText: 'Tipo'),
+                      dropdownColor: AppTheme.bgSurface,
+                      items: _activityTypes,
+                      onChanged: (v) => setState(() => type = v!),
+                    ),
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -1649,7 +1970,6 @@ class _TableEditorPageState extends State<TableEditorPage> {
                       closeOffsetDays: int.tryParse(closeOffsetCtrl.text),
                       openTimeMinutes: withTime ? openTimeMinutes : null,
                       closeTimeMinutes: withTime ? closeTimeMinutes : null,
-                      moodleModuleId: selectedMoodleId,
                     );
                     Navigator.pop(context);
                   }
@@ -1670,34 +1990,15 @@ class _TableEditorPageState extends State<TableEditorPage> {
     ConfigController ctrl,
     DateTime sectionRefDate,
   ) {
-    final nameCtrl = TextEditingController(text: activity.name);
     final openOffsetCtrl = TextEditingController(
       text: activity.openOffsetDays?.toString() ?? '',
     );
     final closeOffsetCtrl = TextEditingController(
       text: activity.closeOffsetDays?.toString() ?? '',
     );
-    String type = activity.activityType;
+    final type = activity.activityType;
     int? openTimeMinutes = activity.openTimeMinutes;
     int? closeTimeMinutes = activity.closeTimeMinutes;
-    int? selectedMoodleId = activity.moodleModuleId;
-    String? selectedMoodleName;
-
-    final sync = context.read<SyncController>();
-    final hasMoodleData = sync.moodleSections.isNotEmpty;
-
-    // Tentar obter o nome do módulo Moodle vinculado
-    if (selectedMoodleId != null && hasMoodleData) {
-      for (final ms in sync.moodleSections) {
-        for (final mod in ms.modules) {
-          if (mod.id == selectedMoodleId) {
-            selectedMoodleName = mod.name;
-            break;
-          }
-        }
-        if (selectedMoodleName != null) break;
-      }
-    }
 
     showDialog(
       context: context,
@@ -1720,39 +2021,14 @@ class _TableEditorPageState extends State<TableEditorPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
-                      controller: nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Nome da atividade',
+                    Text(
+                      activity.name,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    if (hasMoodleData)
-                      _buildMoodleModuleField(
-                        ctx,
-                        sync,
-                        selectedMoodleId,
-                        selectedMoodleName,
-                        type,
-                        (mod) => setState(() {
-                          selectedMoodleId = mod.id;
-                          selectedMoodleName = mod.name;
-                          final mappedType = _modnameToType[mod.modname];
-                          if (mappedType != null) type = mappedType;
-                        }),
-                        () => setState(() {
-                          selectedMoodleId = null;
-                          selectedMoodleName = null;
-                        }),
-                      )
-                    else
-                      DropdownButtonFormField<String>(
-                        initialValue: type,
-                        decoration: const InputDecoration(labelText: 'Tipo'),
-                        dropdownColor: AppTheme.bgSurface,
-                        items: _activityTypes,
-                        onChanged: (v) => setState(() => type = v!),
-                      ),
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -1838,20 +2114,15 @@ class _TableEditorPageState extends State<TableEditorPage> {
               ),
               ElevatedButton(
                 onPressed: () {
-                  if (nameCtrl.text.trim().isNotEmpty) {
-                    ctrl.updateActivity(
-                      sectionId,
-                      activity.id,
-                      name: nameCtrl.text.trim(),
-                      type: type,
-                      openOffsetDays: int.tryParse(openOffsetCtrl.text),
-                      closeOffsetDays: int.tryParse(closeOffsetCtrl.text),
-                      openTimeMinutes: withTime ? openTimeMinutes : null,
-                      closeTimeMinutes: withTime ? closeTimeMinutes : null,
-                      moodleModuleId: selectedMoodleId,
-                    );
-                    Navigator.pop(context);
-                  }
+                  ctrl.updateActivity(
+                    sectionId,
+                    activity.id,
+                    openOffsetDays: int.tryParse(openOffsetCtrl.text),
+                    closeOffsetDays: int.tryParse(closeOffsetCtrl.text),
+                    openTimeMinutes: withTime ? openTimeMinutes : null,
+                    closeTimeMinutes: withTime ? closeTimeMinutes : null,
+                  );
+                  Navigator.pop(context);
                 },
                 child: const Text('Salvar'),
               ),
@@ -1862,106 +2133,62 @@ class _TableEditorPageState extends State<TableEditorPage> {
     );
   }
 
-  Widget _buildMoodleModuleField(
+  /// Shows a picker for linking a section to a Moodle section.
+  /// Only shows sections NOT already linked by other config sections.
+  void _showSectionLinkPicker(
     BuildContext context,
+    SectionEntry section,
+    ConfigController ctrl,
     SyncController sync,
-    int? selectedId,
-    String? selectedName,
-    String currentType,
-    void Function(MoodleModule mod) onSelected,
-    VoidCallback onClear,
   ) {
-    return InkWell(
-      onTap: () async {
-        final result = await _showMoodleModulePicker(context);
-        if (result != null) onSelected(result);
-      },
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: 'Atividade Moodle',
-          suffixIcon: selectedId != null
-              ? IconButton(
-                  icon: const Icon(
-                    Icons.close,
-                    size: 18,
-                    color: AppTheme.danger,
-                  ),
-                  onPressed: onClear,
-                )
-              : const Icon(Icons.arrow_drop_down),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              selectedId != null ? Icons.link : Icons.link_off,
-              size: 18,
-              color: selectedId != null
-                  ? AppTheme.accentGreen
-                  : AppTheme.textSecondary,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    selectedId != null
-                        ? (selectedName ?? 'ID: $selectedId')
-                        : 'Selecionar atividade...',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: selectedId != null
-                          ? AppTheme.textPrimary
-                          : AppTheme.textSecondary,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (selectedId != null)
-                    Text(
-                      '$currentType • ID: $selectedId',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppTheme.textSecondary,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<MoodleModule?> _showMoodleModulePicker(BuildContext context) async {
-    final sync = context.read<SyncController>();
-    final sections = sync.moodleSections;
-
-    if (sections.isEmpty) {
+    final config = ctrl.current;
+    if (config == null) return;
+    final allMoodleSections = sync.moodleSections;
+    if (allMoodleSections.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Nenhuma atividade do Moodle carregada. Faça login e acesse a página de sincronização primeiro.',
+            'Nenhuma seção do Moodle carregada. Faça login primeiro.',
           ),
         ),
       );
-      return null;
+      return;
     }
 
-    return showDialog<MoodleModule>(
+    // Collect already-linked moodle section IDs (excluding this section)
+    final usedIds = <int>{};
+    for (final s in config.sections) {
+      if (s.id != section.id && s.moodleSectionId != null) {
+        usedIds.add(s.moodleSectionId!);
+      }
+    }
+
+    final available = allMoodleSections
+        .where((ms) => !usedIds.contains(ms.id))
+        .toList();
+
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Todas as seções já estão vinculadas.')),
+      );
+      return;
+    }
+
+    showDialog(
       context: context,
       builder: (_) {
         String filter = '';
         return StatefulBuilder(
-          builder: (ctx, setState) {
-            final lowerFilter = filter.toLowerCase();
+          builder: (ctx, setDlgState) {
+            final lf = filter.toLowerCase();
+            final filtered = available
+                .where((s) => lf.isEmpty || s.name.toLowerCase().contains(lf))
+                .toList();
             return AlertDialog(
-              title: const Text('Selecionar Atividade do Moodle'),
+              title: const Text('Vincular Seção'),
               content: SizedBox(
-                width: 500,
-                height: 450,
+                width: 450,
+                height: 350,
                 child: Column(
                   children: [
                     TextField(
@@ -1969,60 +2196,35 @@ class _TableEditorPageState extends State<TableEditorPage> {
                         labelText: 'Buscar...',
                         prefixIcon: Icon(Icons.search),
                       ),
-                      onChanged: (v) => setState(() => filter = v),
+                      onChanged: (v) => setDlgState(() => filter = v),
                     ),
                     const SizedBox(height: 8),
                     Expanded(
-                      child: ListView(
-                        children: [
-                          for (final sec in sections)
-                            if (sec.modules.any(
-                              (m) =>
-                                  lowerFilter.isEmpty ||
-                                  m.name.toLowerCase().contains(lowerFilter) ||
-                                  m.modname.toLowerCase().contains(lowerFilter),
-                            ))
-                              ExpansionTile(
-                                title: Text(
-                                  sec.name,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                initiallyExpanded: lowerFilter.isNotEmpty,
-                                children: [
-                                  for (final mod in sec.modules)
-                                    if (lowerFilter.isEmpty ||
-                                        mod.name.toLowerCase().contains(
-                                          lowerFilter,
-                                        ) ||
-                                        mod.modname.toLowerCase().contains(
-                                          lowerFilter,
-                                        ))
-                                      ListTile(
-                                        dense: true,
-                                        leading: Icon(
-                                          Icons.extension,
-                                          size: 18,
-                                          color: _activityColor(
-                                            _modnameToType[mod.modname] ??
-                                                'Outro',
-                                          ),
-                                        ),
-                                        title: Text(
-                                          mod.name,
-                                          style: const TextStyle(fontSize: 13),
-                                        ),
-                                        subtitle: Text(
-                                          '${_modnameToType[mod.modname] ?? mod.modname} • ID: ${mod.id}',
-                                          style: const TextStyle(fontSize: 11),
-                                        ),
-                                        onTap: () => Navigator.pop(ctx, mod),
-                                      ),
-                                ],
-                              ),
-                        ],
+                      child: ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (_, i) {
+                          final ms = filtered[i];
+                          return ListTile(
+                            dense: true,
+                            leading: const Icon(
+                              Icons.folder_outlined,
+                              size: 20,
+                              color: AppTheme.textSecondary,
+                            ),
+                            title: Text(
+                              ms.name,
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                            subtitle: Text(
+                              'Seção ${ms.section} • ${ms.modules.length} atividades',
+                              style: const TextStyle(fontSize: 11),
+                            ),
+                            onTap: () {
+                              ctrl.linkSectionToMoodle(section.id, ms.id);
+                              Navigator.pop(ctx);
+                            },
+                          );
+                        },
                       ),
                     ),
                   ],
@@ -2038,83 +2240,6 @@ class _TableEditorPageState extends State<TableEditorPage> {
           },
         );
       },
-    );
-  }
-
-  Future<MoodleSection?> _showMoodleSectionPicker(
-    BuildContext context,
-    List<MoodleSection> sections,
-    int? currentId,
-  ) async {
-    String filter = '';
-    return showDialog<MoodleSection>(
-      context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (ctx, setState) {
-          final lowerFilter = filter.toLowerCase();
-          final filtered = sections
-              .where(
-                (s) =>
-                    lowerFilter.isEmpty ||
-                    s.name.toLowerCase().contains(lowerFilter),
-              )
-              .toList();
-          return AlertDialog(
-            title: const Text('Selecionar Seção do Moodle'),
-            content: SizedBox(
-              width: 450,
-              height: 350,
-              child: Column(
-                children: [
-                  TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Buscar...',
-                      prefixIcon: Icon(Icons.search),
-                    ),
-                    onChanged: (v) => setState(() => filter = v),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (_, i) {
-                        final sec = filtered[i];
-                        final isSelected = sec.id == currentId;
-                        return ListTile(
-                          dense: true,
-                          selected: isSelected,
-                          leading: Icon(
-                            Icons.folder_outlined,
-                            size: 20,
-                            color: isSelected
-                                ? AppTheme.accentGreen
-                                : AppTheme.textSecondary,
-                          ),
-                          title: Text(
-                            sec.name,
-                            style: const TextStyle(fontSize: 13),
-                          ),
-                          subtitle: Text(
-                            'Seção ${sec.section} • ${sec.modules.length} atividades',
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                          onTap: () => Navigator.pop(ctx, sec),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar'),
-              ),
-            ],
-          );
-        },
-      ),
     );
   }
 

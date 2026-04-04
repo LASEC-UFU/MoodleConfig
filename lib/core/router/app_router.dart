@@ -7,15 +7,13 @@ class AppRouter {
   static final GoRouter router = GoRouter(
     initialLocation: '/',
     routes: [
-      GoRoute(
-        path: '/',
-        builder: (context, state) => const HomePage(),
-      ),
+      GoRoute(path: '/', builder: (context, state) => const HomePage()),
       GoRoute(
         path: '/editor/:id',
         builder: (context, state) {
           final id = state.pathParameters['id']!;
-          return TableEditorPage(courseConfigId: id);
+          final reeval = state.uri.queryParameters['reeval'] == '1';
+          return TableEditorPage(courseConfigId: id, autoEvaluate: reeval);
         },
       ),
       GoRoute(

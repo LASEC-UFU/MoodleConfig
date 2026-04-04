@@ -12,7 +12,10 @@ class MoodleRepositoryImpl implements IMoodleRepository {
 
   @override
   Future<MoodleCredential> login(
-      String baseUrl, String username, String password) async {
+    String baseUrl,
+    String username,
+    String password,
+  ) async {
     return _datasource.login(baseUrl, username, password);
   }
 
@@ -21,7 +24,14 @@ class MoodleRepositoryImpl implements IMoodleRepository {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_credKey);
     if (raw == null) return null;
-    return MoodleCredential.fromJson(json.decode(raw) as Map<String, dynamic>);
+    final cred = MoodleCredential.fromJson(
+      json.decode(raw) as Map<String, dynamic>,
+    );
+    // Disponibilizar credenciais para sessão AJAX sob demanda
+    if (cred.password.isNotEmpty) {
+      _datasource.setCredentials(cred.username, cred.password);
+    }
+    return cred;
   }
 
   @override
@@ -45,33 +55,81 @@ class MoodleRepositoryImpl implements IMoodleRepository {
 
   @override
   Future<List<MoodleSection>> getCourseContents(
-      String token, String baseUrl, int courseId) async {
+    String token,
+    String baseUrl,
+    int courseId,
+  ) async {
     return _datasource.getCourseContents(token, baseUrl, courseId);
   }
 
   @override
   Future<void> updateSectionName(
-      String token, String baseUrl, int sectionId, String newName) async {
+    String token,
+    String baseUrl,
+    int sectionId,
+    String newName,
+  ) async {
     return _datasource.updateSectionName(token, baseUrl, sectionId, newName);
   }
 
   @override
   Future<void> updateModuleVisibility(
-      String token, String baseUrl, int moduleId, bool visible) async {
+    String token,
+    String baseUrl,
+    int moduleId,
+    int visibility,
+  ) async {
     return _datasource.updateModuleVisibility(
-        token, baseUrl, moduleId, visible);
+      token,
+      baseUrl,
+      moduleId,
+      visibility,
+    );
   }
 
   @override
   Future<void> updateModuleName(
-      String token, String baseUrl, int moduleId, String newName) async {
+    String token,
+    String baseUrl,
+    int moduleId,
+    String newName,
+  ) async {
     return _datasource.updateModuleName(token, baseUrl, moduleId, newName);
   }
 
   @override
   Future<void> updateLabelContent(
-      String token, String baseUrl, int moduleId, String htmlContent) async {
+    String token,
+    String baseUrl,
+    int moduleId,
+    int instanceId,
+    String htmlContent,
+  ) async {
     return _datasource.updateLabelContent(
-        token, baseUrl, moduleId, htmlContent);
+      token,
+      baseUrl,
+      moduleId,
+      instanceId,
+      htmlContent,
+    );
+  }
+
+  @override
+  Future<String> moveModule(
+    String token,
+    String baseUrl,
+    int courseId,
+    int moduleId,
+    int? targetCmId,
+    int targetSectionId,
+  ) async {
+    return _datasource.moveModule(
+      token,
+      baseUrl,
+      courseId,
+      moduleId,
+      targetCmId,
+      targetSectionId,
+    );
   }
 }

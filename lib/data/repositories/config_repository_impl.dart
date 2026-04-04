@@ -236,16 +236,22 @@ class ConfigRepositoryImpl implements IConfigRepository {
     for (int c = 0; c < hdrTexts.length; c++) {
       final h = hdrTexts[c].trim();
       if (h == 'ordem') colOrdem = c;
-      if (h.contains('dias') && (h.contains('início') || h.contains('inicio')))
-        colDiasInicio = c;
       if (h.contains('dias') &&
-          (h.contains('término') || h.contains('termino')))
+          (h.contains('início') || h.contains('inicio'))) {
+        colDiasInicio = c;
+      }
+      if (h.contains('dias') &&
+          (h.contains('término') || h.contains('termino'))) {
         colDiasTermino = c;
-      if (h.contains('hora') && (h.contains('início') || h.contains('inicio')))
-        colHoraInicio = c;
+      }
       if (h.contains('hora') &&
-          (h.contains('término') || h.contains('termino')))
+          (h.contains('início') || h.contains('inicio'))) {
+        colHoraInicio = c;
+      }
+      if (h.contains('hora') &&
+          (h.contains('término') || h.contains('termino'))) {
         colHoraTermino = c;
+      }
       if (h == 'nome') colNome = c;
       if (h == 'tipo') colTipo = c;
       if (h.contains('visível') || h.contains('visivel')) colVisivel = c;
@@ -312,6 +318,9 @@ class ConfigRepositoryImpl implements IConfigRepository {
       }
 
       final isVisible = visivel.toLowerCase() != 'não';
+      final activityVisibility = visivel.toLowerCase() == 'stealth'
+          ? 2
+          : (visivel.toLowerCase() == 'não' ? 0 : 1);
 
       if (tipo.toLowerCase() == 'seção') {
         final orderIndex = int.tryParse(ordem) ?? (sections.length + 1);
@@ -343,7 +352,7 @@ class ConfigRepositoryImpl implements IConfigRepository {
           openTimeMinutes: openTimeMinutes,
           closeTimeMinutes: closeTimeMinutes,
           moodleModuleId: moodleId,
-          visible: isVisible,
+          visibility: activityVisibility,
         );
         final withDates = activity.copyWith(
           openDate: activity.computeOpenDate(sectionRefDate),
@@ -494,7 +503,11 @@ class ConfigRepositoryImpl implements IConfigRepository {
               : TextCellValue(''),
           TextCellValue(activity.name),
           TextCellValue(activity.activityType),
-          TextCellValue(activity.visible ? 'Sim' : 'Não'),
+          TextCellValue(switch (activity.visibility) {
+            0 => 'Não',
+            2 => 'Stealth',
+            _ => 'Sim',
+          }),
           TextCellValue(''),
           activity.moodleModuleId != null
               ? IntCellValue(activity.moodleModuleId!)

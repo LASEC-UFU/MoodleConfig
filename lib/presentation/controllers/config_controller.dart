@@ -276,7 +276,8 @@ class ConfigController extends ChangeNotifier {
     Object? openTimeMinutes = _sentinel,
     Object? closeTimeMinutes = _sentinel,
     Object? moodleModuleId = _sentinel,
-    bool? visible,
+    Object? moodleModuleName = _sentinel,
+    int? visibility,
   }) async {
     if (_current == null) return;
     final sections = _current!.sections.map((s) {
@@ -304,7 +305,10 @@ class ConfigController extends ChangeNotifier {
           moodleModuleId: moodleModuleId == _sentinel
               ? a.moodleModuleId
               : moodleModuleId as int?,
-          visible: visible,
+          moodleModuleName: moodleModuleName == _sentinel
+              ? a.moodleModuleName
+              : moodleModuleName as String?,
+          visibility: visibility,
         );
         // Recomputar datas absolutas
         return updated.copyWith(
@@ -315,8 +319,8 @@ class ConfigController extends ChangeNotifier {
       return s.copyWith(activities: activities);
     }).toList();
     _current = _current!.copyWith(sections: sections);
-    await _repo.save(_current!);
     notifyListeners();
+    await _repo.save(_current!);
   }
 
   Future<void> removeActivity(String sectionId, String activityId) async {
@@ -543,19 +547,45 @@ class ConfigController extends ChangeNotifier {
   Future<void> linkActivityToMoodle(
     String sectionId,
     String activityId,
-    int? moodleModuleId,
-  ) async {
+    int? moodleModuleId, {
+    String? activityType,
+    String? name,
+    String? moodleModuleName,
+  }) async {
     if (_current == null) return;
     final sections = _current!.sections.map((s) {
       if (s.id != sectionId) return s;
       final activities = s.activities.map((a) {
         if (a.id != activityId) return a;
-        return a.copyWith(moodleModuleId: moodleModuleId);
+        return a.copyWith(
+          moodleModuleId: moodleModuleId,
+          activityType: activityType,
+          name: name,
+          moodleModuleName: moodleModuleName,
+        );
       }).toList();
       return s.copyWith(activities: activities);
     }).toList();
     _current = _current!.copyWith(sections: sections);
-    await _repo.save(_current!);
     notifyListeners();
+    await _repo.save(_current!);
+  }
+
+  /// Remove todos os vínculos Moodle (seções + atividades).
+  Future<void> unlinkAll() async {
+    if (_current == null) return;
+    final sections = _current!.sections.map((s) {
+      final activities = s.activities.map((a) {
+        return a.copyWith(
+          moodleModuleId: null,
+          activityType: '',
+          moodleModuleName: null,
+        );
+      }).toList();
+      return s.copyWith(moodleSectionId: null, activities: activities);
+    }).toList();
+    _current = _current!.copyWith(sections: sections);
+    notifyListeners();
+    await _repo.save(_current!);
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
+import 'package:config_moodle/domain/entities/moodle_entities.dart';
 import 'package:config_moodle/presentation/controllers/auth_controller.dart';
 import 'package:config_moodle/presentation/controllers/config_controller.dart';
 import 'package:config_moodle/presentation/controllers/sync_controller.dart';
@@ -17,22 +18,86 @@ class SyncPreviewPage extends StatefulWidget {
 }
 
 class _SyncPreviewPageState extends State<SyncPreviewPage> {
-  int _step = 0; // 0 = escolher curso, 1 = preview matches, 2 = syncing
+  int _step = 0; // 0=links, 1=sync, 2=done
+  bool _loading = true;
+  bool _syncStarted = false;
+  final List<LinkSuggestion> _suggestions = const [];
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final configCtrl = context.read<ConfigController>();
-      final auth = context.read<AuthController>();
-      final sync = context.read<SyncController>();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _init());
+  }
 
-      configCtrl.loadById(widget.courseConfigId);
+  Future<void> _init() async {
+    final configCtrl = context.read<ConfigController>();
+    final auth = context.read<AuthController>();
+    final sync = context.read<SyncController>();
 
-      if (auth.isLoggedIn) {
-        sync.loadCourses(auth.token, auth.baseUrl);
+    await configCtrl.loadById(widget.courseConfigId);
+    final config = configCtrl.current;
+
+    if (!auth.isLoggedIn || config == null || config.moodleCourseId == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+
+    // Garantir seções Moodle carregadas
+    await sync.loadMoodleSections(
+      auth.token,
+      auth.baseUrl,
+      config.moodleCourseId!,
+    );
+    sync.generateMatches(config);
+
+    // Pular direto para execução (vínculos agora são gerenciados no editor)
+    if (mounted) {
+      setState(() {
+        _step = 1;
+        _loading = false;
+      });
+      _startSync();
+    }
+  }
+
+  void _startSync() {
+    if (_syncStarted) return;
+    _syncStarted = true;
+    final auth = context.read<AuthController>();
+    final configCtrl = context.read<ConfigController>();
+    final sync = context.read<SyncController>();
+    final config = configCtrl.current!;
+    sync.syncToMoodle(auth.token, auth.baseUrl, config);
+  }
+
+  Future<void> _confirmLinks() async {
+    final configCtrl = context.read<ConfigController>();
+    final sync = context.read<SyncController>();
+
+    // Salvar os vínculos escolhidos pelo usuário
+    for (final s in _suggestions) {
+      if (s.suggestedMoodleId == null) continue;
+      if (s.type == LinkSuggestionType.section) {
+        await configCtrl.linkSectionToMoodle(s.sectionId, s.suggestedMoodleId!);
+      } else if (s.activityId != null) {
+        await configCtrl.linkActivityToMoodle(
+          s.sectionId,
+          s.activityId!,
+          s.suggestedMoodleId!,
+          moodleModuleName: s.suggestedMoodleName,
+        );
       }
-    });
+    }
+
+    // Recarregar config e regenerar matches com vínculos atualizados
+    await configCtrl.loadById(widget.courseConfigId);
+    final config = configCtrl.current!;
+    sync.generateMatches(config);
+
+    if (mounted) {
+      setState(() => _step = 1);
+      _startSync();
+    }
   }
 
   @override
@@ -49,7 +114,6 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
           child: Column(
             children: [
               _buildTopBar(context, config),
-              _buildStepIndicator(),
               Expanded(
                 child: !auth.isLoggedIn
                     ? const EmptyState(
@@ -58,13 +122,22 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                         subtitle:
                             'Faça login no Moodle pela tela inicial primeiro.',
                       )
-                    : config == null
+                    : _loading || config == null
                     ? const Center(
                         child: CircularProgressIndicator(
                           color: AppTheme.primary,
                         ),
                       )
-                    : _buildContent(context, auth, configCtrl, syncCtrl),
+                    : config.moodleCourseId == null
+                    ? const EmptyState(
+                        icon: Icons.link_off,
+                        title: 'Disciplina não vinculada',
+                        subtitle:
+                            'Vincule esta configuração a um curso do Moodle primeiro.',
+                      )
+                    : _step == 0
+                    ? _buildLinkConfirmation(context)
+                    : _buildSyncProgress(context, syncCtrl),
               ),
             ],
           ),
@@ -74,6 +147,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
   }
 
   Widget _buildTopBar(BuildContext context, dynamic config) {
+    final stepLabel = _step == 0 ? 'Vincular' : 'Sincronizar';
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Row(
@@ -83,9 +157,9 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
             onPressed: () => context.go('/editor/${widget.courseConfigId}'),
           ),
           const SizedBox(width: 8),
-          const Text(
-            'Sincronizar com Moodle',
-            style: TextStyle(
+          Text(
+            'Sincronizar — $stepLabel',
+            style: const TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w600,
               color: AppTheme.textPrimary,
@@ -103,208 +177,26 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
     );
   }
 
-  Widget _buildStepIndicator() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      child: Row(
-        children: [
-          _stepDot(0, 'Disciplina'),
-          _stepLine(0),
-          _stepDot(1, 'Preview'),
-          _stepLine(1),
-          _stepDot(2, 'Sincronizar'),
-        ],
-      ),
-    );
-  }
+  // ── Step 0: Confirmação de vínculos ────────────────────────────────────
 
-  Widget _stepDot(int idx, String label) {
-    final isActive = _step >= idx;
+  Widget _buildLinkConfirmation(BuildContext context) {
+    final sync = context.read<SyncController>();
     return Column(
       children: [
-        Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: isActive ? AppTheme.primaryGradient : null,
-            color: isActive ? null : AppTheme.bgCard,
-            border: Border.all(
-              color: isActive ? AppTheme.primary : AppTheme.divider,
-            ),
-          ),
-          child: Center(
-            child: isActive && _step > idx
-                ? const Icon(Icons.check, color: Colors.white, size: 16)
-                : Text(
-                    '${idx + 1}',
-                    style: TextStyle(
-                      color: isActive ? Colors.white : AppTheme.textSecondary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+          child: Text(
+            'Itens sem vínculo encontrados. Confirme ou altere as sugestões abaixo:',
+            style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
           ),
         ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            color: isActive ? AppTheme.textPrimary : AppTheme.textSecondary,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _stepLine(int afterIdx) {
-    final isActive = _step > afterIdx;
-    return Expanded(
-      child: Container(
-        height: 2,
-        margin: const EdgeInsets.only(bottom: 16),
-        color: isActive ? AppTheme.primary : AppTheme.divider,
-      ),
-    );
-  }
-
-  Widget _buildContent(
-    BuildContext context,
-    AuthController auth,
-    ConfigController configCtrl,
-    SyncController syncCtrl,
-  ) {
-    switch (_step) {
-      case 0:
-        return _buildCourseSelector(context, auth, configCtrl, syncCtrl);
-      case 1:
-        return _buildMatchPreview(context, auth, configCtrl, syncCtrl);
-      case 2:
-        return _buildSyncProgress(context, auth, configCtrl, syncCtrl);
-      default:
-        return const SizedBox();
-    }
-  }
-
-  // ── Step 0: Selecionar disciplina ─────────────────────────────────────────
-
-  Widget _buildCourseSelector(
-    BuildContext context,
-    AuthController auth,
-    ConfigController configCtrl,
-    SyncController syncCtrl,
-  ) {
-    if (syncCtrl.loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: AppTheme.primary),
-      );
-    }
-
-    if (syncCtrl.courses.isEmpty) {
-      return const EmptyState(
-        icon: Icons.school,
-        title: 'Nenhuma disciplina encontrada',
-        subtitle: 'Não foram encontradas disciplinas no Moodle.',
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(20),
-      itemCount: syncCtrl.courses.length,
-      itemBuilder: (context, index) {
-        final course = syncCtrl.courses[index];
-        final isSelected = configCtrl.current?.moodleCourseId == course.id;
-
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: GlassCard(
-            useGradient: isSelected,
-            onTap: () async {
-              configCtrl.linkMoodleCourse(course.id, course.fullname);
-              await syncCtrl.loadMoodleSections(
-                auth.token,
-                auth.baseUrl,
-                course.id,
-              );
-              syncCtrl.generateMatches(configCtrl.current!);
-              setState(() => _step = 1);
-            },
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppTheme.primary.withAlpha(50)
-                        : AppTheme.bgCardAlt,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    Icons.school,
-                    color: isSelected
-                        ? AppTheme.primary
-                        : AppTheme.textSecondary,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        course.fullname,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textPrimary,
-                        ),
-                      ),
-                      Text(
-                        course.shortname,
-                        style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (isSelected)
-                  const Icon(Icons.check_circle, color: AppTheme.accentGreen),
-                const Icon(Icons.chevron_right, color: AppTheme.textSecondary),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // ── Step 1: Preview dos matches ───────────────────────────────────────────
-
-  Widget _buildMatchPreview(
-    BuildContext context,
-    AuthController auth,
-    ConfigController configCtrl,
-    SyncController syncCtrl,
-  ) {
-    if (syncCtrl.matches.isEmpty) {
-      return const EmptyState(
-        icon: Icons.compare_arrows,
-        title: 'Sem correspondências',
-        subtitle: 'Não foi possível encontrar correspondências.',
-      );
-    }
-
-    return Column(
-      children: [
         Expanded(
           child: ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: syncCtrl.matches.length,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            itemCount: _suggestions.length,
             itemBuilder: (context, index) {
-              final m = syncCtrl.matches[index];
-              return _buildMatchCard(m);
+              final s = _suggestions[index];
+              return _buildSuggestionCard(s, sync, index);
             },
           ),
         ),
@@ -314,24 +206,18 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => setState(() => _step = 0),
+                  onPressed: () =>
+                      context.go('/editor/${widget.courseConfigId}'),
                   icon: const Icon(Icons.arrow_back),
-                  label: const Text('Voltar'),
+                  label: const Text('Cancelar'),
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: GradientButton(
-                  label: 'Sincronizar Agora',
-                  icon: Icons.sync,
-                  onPressed: () {
-                    setState(() => _step = 2);
-                    syncCtrl.syncToMoodle(
-                      auth.token,
-                      auth.baseUrl,
-                      configCtrl.current!,
-                    );
-                  },
+                  label: 'Confirmar e Sincronizar',
+                  icon: Icons.check,
+                  onPressed: _confirmLinks,
                 ),
               ),
             ],
@@ -341,11 +227,16 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
     );
   }
 
-  Widget _buildMatchCard(SectionMatch match) {
-    final hasMatch = match.moodleSection != null;
-    final scoreColor = match.score > 0.8
+  Widget _buildSuggestionCard(
+    LinkSuggestion suggestion,
+    SyncController sync,
+    int index,
+  ) {
+    final isSection = suggestion.type == LinkSuggestionType.section;
+    final hasMatch = suggestion.suggestedMoodleId != null;
+    final scoreColor = suggestion.score > 0.8
         ? AppTheme.accentGreen
-        : match.score > 0.5
+        : suggestion.score > 0.5
         ? AppTheme.warning
         : AppTheme.danger;
 
@@ -357,38 +248,19 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
           children: [
             Row(
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'LOCAL',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: AppTheme.textSecondary,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      Text(
-                        match.local.name,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                ),
                 Icon(
-                  hasMatch ? Icons.link : Icons.link_off,
-                  color: hasMatch ? AppTheme.accentGreen : AppTheme.danger,
+                  isSection ? Icons.folder_outlined : Icons.extension,
+                  size: 18,
+                  color: isSection ? AppTheme.primary : AppTheme.accent,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'MOODLE',
-                        style: TextStyle(
+                      Text(
+                        isSection ? 'SEÇÃO' : 'ATIVIDADE',
+                        style: const TextStyle(
                           fontSize: 10,
                           color: AppTheme.textSecondary,
                           fontWeight: FontWeight.w700,
@@ -396,81 +268,308 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                         ),
                       ),
                       Text(
-                        hasMatch
-                            ? match.moodleSection!.name
-                            : 'Sem correspondência',
-                        style: TextStyle(
+                        suggestion.localName,
+                        style: const TextStyle(
                           fontWeight: FontWeight.w600,
-                          color: hasMatch
-                              ? AppTheme.textPrimary
-                              : AppTheme.textSecondary,
+                          fontSize: 13,
                         ),
                       ),
                     ],
                   ),
                 ),
-                StatusChip(
-                  label: '${(match.score * 100).toStringAsFixed(0)}%',
-                  color: scoreColor,
-                ),
+                if (hasMatch)
+                  StatusChip(
+                    label: '${(suggestion.score * 100).toStringAsFixed(0)}%',
+                    color: scoreColor,
+                  ),
               ],
             ),
-            if (match.activityMatches.isNotEmpty) ...[
-              const Divider(color: AppTheme.divider, height: 20),
-              ...match.activityMatches.map(
-                (am) => Padding(
-                  padding: const EdgeInsets.only(left: 16, bottom: 4),
-                  child: Row(
-                    children: [
-                      StatusChip(
-                        label: am.local.activityType,
-                        color: AppTheme.accent,
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(
+                  Icons.arrow_forward,
+                  size: 16,
+                  color: AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: InkWell(
+                    onTap: () => _showMoodlePicker(suggestion, sync, index),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          am.local.name,
-                          style: const TextStyle(fontSize: 12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.bgCardAlt,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: hasMatch
+                              ? AppTheme.accentGreen.withAlpha(80)
+                              : AppTheme.divider,
                         ),
                       ),
-                      Icon(
-                        am.moodleModule != null
-                            ? Icons.check_circle_outline
-                            : Icons.help_outline,
-                        size: 16,
-                        color: am.moodleModule != null
-                            ? AppTheme.accentGreen
-                            : AppTheme.warning,
-                      ),
-                      if (am.moodleModule != null) ...[
-                        const SizedBox(width: 4),
-                        Text(
-                          '${(am.score * 100).toStringAsFixed(0)}%',
-                          style: const TextStyle(
-                            fontSize: 11,
+                      child: Row(
+                        children: [
+                          Icon(
+                            hasMatch ? Icons.link : Icons.link_off,
+                            size: 16,
+                            color: hasMatch
+                                ? AppTheme.accentGreen
+                                : AppTheme.textSecondary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              hasMatch
+                                  ? suggestion.suggestedMoodleName!
+                                  : 'Nenhum — toque para selecionar',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: hasMatch
+                                    ? AppTheme.textPrimary
+                                    : AppTheme.textSecondary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_drop_down,
+                            size: 18,
                             color: AppTheme.textSecondary,
                           ),
-                        ),
-                      ],
-                    ],
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ],
+                if (hasMatch)
+                  IconButton(
+                    icon: const Icon(
+                      Icons.close,
+                      size: 16,
+                      color: AppTheme.danger,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        suggestion.suggestedMoodleId = null;
+                        suggestion.suggestedMoodleName = null;
+                      });
+                    },
+                  ),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 
-  // ── Step 2: Progresso da sincronização ────────────────────────────────────
+  void _showMoodlePicker(
+    LinkSuggestion suggestion,
+    SyncController sync,
+    int index,
+  ) async {
+    if (suggestion.type == LinkSuggestionType.section) {
+      final sections = sync.moodleSections;
+      final result = await _showSectionPicker(
+        context,
+        sections,
+        suggestion.suggestedMoodleId,
+      );
+      if (result != null && mounted) {
+        setState(() {
+          suggestion.suggestedMoodleId = result.id;
+          suggestion.suggestedMoodleName = result.name;
+        });
+      }
+    } else {
+      // Atividade — pegar módulos da seção Moodle vinculada
+      final configCtrl = context.read<ConfigController>();
+      final config = configCtrl.current!;
+      final section = config.sections.firstWhere(
+        (s) => s.id == suggestion.sectionId,
+      );
+      MoodleSection? moodleSection;
+      if (section.moodleSectionId != null) {
+        for (final ms in sync.moodleSections) {
+          if (ms.id == section.moodleSectionId) {
+            moodleSection = ms;
+            break;
+          }
+        }
+      }
+      if (moodleSection == null) return;
 
-  Widget _buildSyncProgress(
+      final result = await _showModulePicker(
+        context,
+        moodleSection.modules,
+        suggestion.suggestedMoodleId,
+      );
+      if (result != null && mounted) {
+        setState(() {
+          suggestion.suggestedMoodleId = result.id;
+          suggestion.suggestedMoodleName = result.name;
+        });
+      }
+    }
+  }
+
+  Future<MoodleSection?> _showSectionPicker(
     BuildContext context,
-    AuthController auth,
-    ConfigController configCtrl,
-    SyncController syncCtrl,
+    List<MoodleSection> sections,
+    int? currentId,
   ) {
+    String filter = '';
+    return showDialog<MoodleSection>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final lf = filter.toLowerCase();
+          final filtered = sections
+              .where((s) => lf.isEmpty || s.name.toLowerCase().contains(lf))
+              .toList();
+          return AlertDialog(
+            title: const Text('Selecionar Seção do Moodle'),
+            content: SizedBox(
+              width: 450,
+              height: 350,
+              child: Column(
+                children: [
+                  TextField(
+                    decoration: const InputDecoration(
+                      labelText: 'Buscar...',
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                    onChanged: (v) => setDialogState(() => filter = v),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (_, i) {
+                        final sec = filtered[i];
+                        final isSel = sec.id == currentId;
+                        return ListTile(
+                          dense: true,
+                          selected: isSel,
+                          leading: Icon(
+                            Icons.folder_outlined,
+                            size: 20,
+                            color: isSel
+                                ? AppTheme.accentGreen
+                                : AppTheme.textSecondary,
+                          ),
+                          title: Text(
+                            sec.name,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            'Seção ${sec.section} • ${sec.modules.length} atividades',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          onTap: () => Navigator.pop(ctx, sec),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<MoodleModule?> _showModulePicker(
+    BuildContext context,
+    List<MoodleModule> modules,
+    int? currentId,
+  ) {
+    String filter = '';
+    return showDialog<MoodleModule>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final lf = filter.toLowerCase();
+          final filtered = modules
+              .where(
+                (m) =>
+                    lf.isEmpty ||
+                    m.name.toLowerCase().contains(lf) ||
+                    m.modname.toLowerCase().contains(lf),
+              )
+              .toList();
+          return AlertDialog(
+            title: const Text('Selecionar Atividade do Moodle'),
+            content: SizedBox(
+              width: 450,
+              height: 350,
+              child: Column(
+                children: [
+                  TextField(
+                    decoration: const InputDecoration(
+                      labelText: 'Buscar...',
+                      prefixIcon: Icon(Icons.search),
+                    ),
+                    onChanged: (v) => setDialogState(() => filter = v),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (_, i) {
+                        final mod = filtered[i];
+                        final isSel = mod.id == currentId;
+                        return ListTile(
+                          dense: true,
+                          selected: isSel,
+                          leading: Icon(
+                            Icons.extension,
+                            size: 18,
+                            color: isSel
+                                ? AppTheme.accentGreen
+                                : AppTheme.textSecondary,
+                          ),
+                          title: Text(
+                            mod.name,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          subtitle: Text(
+                            '${mod.modname} • ID: ${mod.id}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                          onTap: () => Navigator.pop(ctx, mod),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Step 1: Progresso da sincronização ─────────────────────────────────
+
+  Widget _buildSyncProgress(BuildContext context, SyncController syncCtrl) {
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(40),
@@ -561,7 +660,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                   label: 'Concluído',
                   icon: Icons.done,
                   onPressed: () =>
-                      context.go('/editor/${widget.courseConfigId}'),
+                      context.go('/editor/${widget.courseConfigId}?reeval=1'),
                 ),
               ],
             ],

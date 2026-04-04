@@ -168,7 +168,10 @@ class ActivityEntry {
   final int? openTimeMinutes; // minutos desde 00:00 (ex: 480 = 08:00)
   final int? closeTimeMinutes;
   final int? moodleModuleId;
-  final bool visible;
+  final String? moodleModuleName;
+
+  /// 0=oculto, 1=visível, 2=disponível mas não mostrar (stealth)
+  final int visibility;
 
   ActivityEntry({
     required this.id,
@@ -181,7 +184,8 @@ class ActivityEntry {
     this.openTimeMinutes,
     this.closeTimeMinutes,
     this.moodleModuleId,
-    this.visible = true,
+    this.moodleModuleName,
+    this.visibility = 1,
   });
 
   /// Calcula a data de abertura a partir da data de referência da seção.
@@ -226,7 +230,8 @@ class ActivityEntry {
     Object? openTimeMinutes = _sentinel,
     Object? closeTimeMinutes = _sentinel,
     Object? moodleModuleId = _sentinel,
-    bool? visible,
+    Object? moodleModuleName = _sentinel,
+    int? visibility,
   }) {
     return ActivityEntry(
       id: id,
@@ -251,7 +256,10 @@ class ActivityEntry {
       moodleModuleId: moodleModuleId == _sentinel
           ? this.moodleModuleId
           : moodleModuleId as int?,
-      visible: visible ?? this.visible,
+      moodleModuleName: moodleModuleName == _sentinel
+          ? this.moodleModuleName
+          : moodleModuleName as String?,
+      visibility: visibility ?? this.visibility,
     );
   }
 
@@ -266,7 +274,8 @@ class ActivityEntry {
     'openTimeMinutes': openTimeMinutes,
     'closeTimeMinutes': closeTimeMinutes,
     'moodleModuleId': moodleModuleId,
-    'visible': visible,
+    'moodleModuleName': moodleModuleName,
+    'visibility': visibility,
   };
 
   factory ActivityEntry.fromJson(Map<String, dynamic> json) => ActivityEntry(
@@ -284,6 +293,8 @@ class ActivityEntry {
     openTimeMinutes: json['openTimeMinutes'] as int?,
     closeTimeMinutes: json['closeTimeMinutes'] as int?,
     moodleModuleId: json['moodleModuleId'] as int?,
-    visible: json['visible'] as bool? ?? true,
+    moodleModuleName: json['moodleModuleName'] as String?,
+    visibility:
+        json['visibility'] as int? ?? (json['visible'] == false ? 0 : 1),
   );
 }

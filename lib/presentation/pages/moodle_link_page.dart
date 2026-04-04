@@ -39,7 +39,10 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
     }
 
     await sync.loadMoodleSections(
-        auth.token, auth.baseUrl, config.moodleCourseId!);
+      auth.token,
+      auth.baseUrl,
+      config.moodleCourseId!,
+    );
     if (mounted) setState(() => _moodleLoaded = true);
   }
 
@@ -96,8 +99,13 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
     );
   }
 
-  Widget _buildBody(BuildContext context, CourseConfig? config,
-      SyncController sync, AuthController auth, ConfigController ctrl) {
+  Widget _buildBody(
+    BuildContext context,
+    CourseConfig? config,
+    SyncController sync,
+    AuthController auth,
+    ConfigController ctrl,
+  ) {
     if (config == null) {
       return const EmptyState(
         icon: Icons.error_outline,
@@ -134,8 +142,10 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
           children: [
             CircularProgressIndicator(color: AppTheme.primary),
             SizedBox(height: 16),
-            Text('Carregando conteúdo do Moodle...',
-                style: TextStyle(color: AppTheme.textSecondary)),
+            Text(
+              'Carregando conteúdo do Moodle...',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
           ],
         ),
       );
@@ -165,25 +175,35 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
     return _buildLinkList(context, config, sync.moodleSections, ctrl);
   }
 
-  Widget _buildLinkList(BuildContext context, CourseConfig config,
-      List<MoodleSection> moodleSections, ConfigController ctrl) {
+  Widget _buildLinkList(
+    BuildContext context,
+    CourseConfig config,
+    List<MoodleSection> moodleSections,
+    ConfigController ctrl,
+  ) {
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 80),
       itemCount: config.sections.length,
       itemBuilder: (context, index) {
         final section = config.sections[index];
         return _buildSectionLinkCard(
-            context, config, section, moodleSections, ctrl);
+          context,
+          config,
+          section,
+          moodleSections,
+          ctrl,
+        );
       },
     );
   }
 
   Widget _buildSectionLinkCard(
-      BuildContext context,
-      CourseConfig config,
-      SectionEntry section,
-      List<MoodleSection> moodleSections,
-      ConfigController ctrl) {
+    BuildContext context,
+    CourseConfig config,
+    SectionEntry section,
+    List<MoodleSection> moodleSections,
+    ConfigController ctrl,
+  ) {
     final linkedMoodleSection = moodleSections
         .where((ms) => ms.id == section.moodleSectionId)
         .firstOrNull;
@@ -222,20 +242,32 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
               ),
             ),
             subtitle: _buildSectionDropdown(
-                section, moodleSections, ctrl, linkedMoodleSection),
+              section,
+              moodleSections,
+              ctrl,
+              linkedMoodleSection,
+            ),
             children: [
               if (linkedMoodleSection != null)
-                ...section.activities.map((activity) => _buildActivityLinkRow(
-                    context, section, activity, linkedMoodleSection, ctrl)),
+                ...section.activities.map(
+                  (activity) => _buildActivityLinkRow(
+                    context,
+                    section,
+                    activity,
+                    linkedMoodleSection,
+                    ctrl,
+                  ),
+                ),
               if (linkedMoodleSection == null && section.activities.isNotEmpty)
                 const Padding(
                   padding: EdgeInsets.all(12),
                   child: Text(
                     'Vincule a seção primeiro para vincular as atividades.',
                     style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                        fontStyle: FontStyle.italic),
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
                   ),
                 ),
             ],
@@ -246,18 +278,21 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
   }
 
   Widget _buildSectionDropdown(
-      SectionEntry section,
-      List<MoodleSection> moodleSections,
-      ConfigController ctrl,
-      MoodleSection? currentLinked) {
+    SectionEntry section,
+    List<MoodleSection> moodleSections,
+    ConfigController ctrl,
+    MoodleSection? currentLinked,
+  ) {
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: DropdownButtonFormField<int?>(
         initialValue: section.moodleSectionId,
         decoration: InputDecoration(
           isDense: true,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 8,
+          ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: AppTheme.divider),
@@ -268,31 +303,41 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
           ),
           filled: true,
           fillColor: AppTheme.bgSurface,
-          prefixIcon:
-              const Icon(Icons.school, size: 16, color: AppTheme.accent),
+          prefixIcon: const Icon(
+            Icons.school,
+            size: 16,
+            color: AppTheme.accent,
+          ),
         ),
         dropdownColor: AppTheme.bgSurface,
         style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-        hint: const Text('Selecione a seção do Moodle',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+        hint: const Text(
+          'Selecione a seção do Moodle',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+        ),
         isExpanded: true,
         items: [
           const DropdownMenuItem<int?>(
             value: null,
-            child: Text('Nenhuma (desvincular)',
-                style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontStyle: FontStyle.italic,
-                    fontSize: 12)),
+            child: Text(
+              'Nenhuma (desvincular)',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontStyle: FontStyle.italic,
+                fontSize: 12,
+              ),
+            ),
           ),
-          ...moodleSections.map((ms) => DropdownMenuItem<int?>(
-                value: ms.id,
-                child: Text(
-                  '${ms.section} - ${ms.name}',
-                  style: const TextStyle(fontSize: 12),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              )),
+          ...moodleSections.map(
+            (ms) => DropdownMenuItem<int?>(
+              value: ms.id,
+              child: Text(
+                '${ms.section} - ${ms.name}',
+                style: const TextStyle(fontSize: 12),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
         ],
         onChanged: (moodleId) {
           ctrl.linkSectionToMoodle(section.id, moodleId);
@@ -302,11 +347,12 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
   }
 
   Widget _buildActivityLinkRow(
-      BuildContext context,
-      SectionEntry section,
-      ActivityEntry activity,
-      MoodleSection moodleSection,
-      ConfigController ctrl) {
+    BuildContext context,
+    SectionEntry section,
+    ActivityEntry activity,
+    MoodleSection moodleSection,
+    ConfigController ctrl,
+  ) {
     final linked = moodleSection.modules
         .where((m) => m.id == activity.moodleModuleId)
         .firstOrNull;
@@ -318,15 +364,13 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
         children: [
           Icon(
             linked != null ? Icons.check_circle : Icons.radio_button_unchecked,
-            color:
-                linked != null ? AppTheme.accentGreen : AppTheme.textSecondary,
+            color: linked != null
+                ? AppTheme.accentGreen
+                : AppTheme.textSecondary,
             size: 16,
           ),
           const SizedBox(width: 8),
-          StatusChip(
-            label: activity.activityType,
-            color: AppTheme.accent,
-          ),
+          StatusChip(label: activity.activityType, color: AppTheme.accent),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -345,8 +389,10 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
                   initialValue: activity.moodleModuleId,
                   decoration: InputDecoration(
                     isDense: true,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(6),
                       borderSide: BorderSide(color: AppTheme.divider),
@@ -360,33 +406,53 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
                   ),
                   dropdownColor: AppTheme.bgSurface,
                   style: const TextStyle(
-                      color: AppTheme.textPrimary, fontSize: 11),
-                  hint: const Text('Selecione módulo Moodle',
-                      style: TextStyle(
-                          color: AppTheme.textSecondary, fontSize: 11)),
+                    color: AppTheme.textPrimary,
+                    fontSize: 11,
+                  ),
+                  hint: const Text(
+                    'Selecione módulo Moodle',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
                   isExpanded: true,
                   items: [
                     const DropdownMenuItem<int?>(
                       value: null,
-                      child: Text('Nenhum (desvincular)',
-                          style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontStyle: FontStyle.italic,
-                              fontSize: 11)),
+                      child: Text(
+                        'Nenhum (desvincular)',
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontStyle: FontStyle.italic,
+                          fontSize: 11,
+                        ),
+                      ),
                     ),
-                    ...moodleSection.modules
-                        .map((mod) => DropdownMenuItem<int?>(
-                              value: mod.id,
-                              child: Text(
-                                '${mod.name} (${mod.modname})',
-                                style: const TextStyle(fontSize: 11),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            )),
+                    ...moodleSection.modules.map(
+                      (mod) => DropdownMenuItem<int?>(
+                        value: mod.id,
+                        child: Text(
+                          '${mod.name} (${mod.modname})',
+                          style: const TextStyle(fontSize: 11),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
                   ],
                   onChanged: (moduleId) {
+                    final modName = moduleId == null
+                        ? null
+                        : moodleSection.modules
+                              .where((m) => m.id == moduleId)
+                              .map((m) => m.name)
+                              .firstOrNull;
                     ctrl.linkActivityToMoodle(
-                        section.id, activity.id, moduleId);
+                      section.id,
+                      activity.id,
+                      moduleId,
+                      moodleModuleName: modName,
+                    );
                   },
                 ),
               ],

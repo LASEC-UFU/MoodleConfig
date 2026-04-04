@@ -1,6 +1,7 @@
 class MoodleCredential {
   final String moodleUrl;
   final String username;
+  final String password;
   final String token;
   final int userId;
   final String fullname;
@@ -9,6 +10,7 @@ class MoodleCredential {
   MoodleCredential({
     required this.moodleUrl,
     required this.username,
+    required this.password,
     required this.token,
     required this.userId,
     required this.fullname,
@@ -18,6 +20,7 @@ class MoodleCredential {
   Map<String, dynamic> toJson() => {
     'moodleUrl': moodleUrl,
     'username': username,
+    'password': password,
     'token': token,
     'userId': userId,
     'fullname': fullname,
@@ -28,6 +31,7 @@ class MoodleCredential {
       MoodleCredential(
         moodleUrl: json['moodleUrl'] as String,
         username: json['username'] as String,
+        password: json['password'] as String? ?? '',
         token: json['token'] as String,
         userId: json['userId'] as int,
         fullname: json['fullname'] as String,
@@ -86,30 +90,40 @@ class MoodleSection {
 
 class MoodleModule {
   final int id;
+  final int instance; // ID da instância do módulo (label.id, assign.id, etc.)
   final String name;
   final String modname; // assign, quiz, resource, etc.
-  final bool visible;
+  /// 0=oculto, 1=visível, 2=stealth (disponível mas não mostrado)
+  final int visibility;
   final List<MoodleDate> dates;
 
   MoodleModule({
     required this.id,
+    required this.instance,
     required this.name,
     required this.modname,
-    required this.visible,
+    required this.visibility,
     required this.dates,
   });
 
-  factory MoodleModule.fromJson(Map<String, dynamic> json) => MoodleModule(
-    id: json['id'] as int,
-    name: json['name'] as String? ?? '',
-    modname: json['modname'] as String? ?? '',
-    visible: (json['visible'] as int?) == 1,
-    dates:
-        (json['dates'] as List?)
-            ?.map((d) => MoodleDate.fromJson(d as Map<String, dynamic>))
-            .toList() ??
-        [],
-  );
+  factory MoodleModule.fromJson(Map<String, dynamic> json) {
+    final visible = (json['visible'] as int?) ?? 0;
+    final onCoursePage = (json['visibleoncoursepage'] as int?) ?? 1;
+    // 0=hidden, 1=show, 2=stealth
+    final vis = visible == 0 ? 0 : (onCoursePage == 0 ? 2 : 1);
+    return MoodleModule(
+      id: json['id'] as int,
+      instance: json['instance'] as int? ?? 0,
+      name: json['name'] as String? ?? '',
+      modname: json['modname'] as String? ?? '',
+      visibility: vis,
+      dates:
+          (json['dates'] as List?)
+              ?.map((d) => MoodleDate.fromJson(d as Map<String, dynamic>))
+              .toList() ??
+          [],
+    );
+  }
 }
 
 class MoodleDate {
