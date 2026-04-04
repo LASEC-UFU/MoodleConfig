@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  product.wxs — Definição do instalador MSI para Config Moodle (WiX v3/x64)
+
+  UpgradeCode é IMUTÁVEL: não altere após a primeira publicação,
+  pois identifica a família do produto para atualizações e remoções.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <Product
+    Id="*"
+    Name="Config Moodle"
+    Language="1033"
+    Version="$(var.ProductVersion)"
+    Manufacturer="Josue Morais"
+    UpgradeCode="{D4E5F6A7-B8C9-4D2E-9F3A-1B2C3D4E5F6A}">
+
+    <Package
+      InstallerVersion="500"
+      Compressed="yes"
+      InstallScope="perMachine"
+      Platform="x64"
+      Description="Config Moodle — Instalador Windows" />
+
+    <!-- Impede instalação de versão mais antiga sobre mais nova -->
+    <MajorUpgrade
+      DowngradeErrorMessage="Uma versão mais recente do Config Moodle já está instalada." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Ícone extraído do próprio executável -->
+    <Icon Id="AppIcon" SourceFile="$(var.AppExe)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPHELPLINK"    Value="https://github.com/josuemoraisgh/config_moodle" />
+
+    <!-- ─── Estrutura de diretórios ─────────────────────────────────── -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+
+      <!-- Arquivos do aplicativo em C:\Program Files\ -->
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Config Moodle" />
+      </Directory>
+
+      <!-- Atalho no Menu Iniciar -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="AppMenuFolder" Name="Config Moodle" />
+      </Directory>
+
+      <!-- Atalho na Área de Trabalho -->
+      <Directory Id="DesktopFolder" Name="Desktop" />
+
+    </Directory>
+
+    <!-- ─── Atalho: Menu Iniciar ─────────────────────────────────────── -->
+    <DirectoryRef Id="AppMenuFolder">
+      <Component Id="StartMenuShortcut"
+                 Guid="{E5F6A7B8-C9D0-5E3F-A4B5-2C3D4E5F6A7B}">
+        <Shortcut
+          Id="StartMenuEntry"
+          Name="Config Moodle"
+          Description="Configurador de disciplinas Moodle"
+          Target="[INSTALLFOLDER]config_moodle.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <!-- Remove a pasta ao desinstalar -->
+        <RemoveFolder Id="RemoveAppMenuFolder"
+                      Directory="AppMenuFolder"
+                      On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\JosueMorais\ConfigMoodle"
+                       Name="StartMenuInstalled"
+                       Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ─── Atalho: Área de Trabalho ────────────────────────────────── -->
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut"
+                 Guid="{F6A7B8C9-D0E1-6F4A-B5C6-3D4E5F6A7B8C}">
+        <Shortcut
+          Id="DesktopEntry"
+          Name="Config Moodle"
+          Description="Configurador de disciplinas Moodle"
+          Target="[INSTALLFOLDER]config_moodle.exe"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\JosueMorais\ConfigMoodle"
+                       Name="DesktopInstalled"
+                       Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ─── Feature principal ───────────────────────────────────────── -->
+    <Feature Id="Complete" Title="Config Moodle" Level="1">
+      <!-- Arquivos colhidos automaticamente pelo heat.exe -->
+      <ComponentGroupRef Id="HarvestedFiles" />
+      <!-- Atalhos -->
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- ─── Interface do instalador (WixUI_Minimal) ──────────────────── -->
+    <UIRef Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="windows\installer\License.rtf" />
+
+  </Product>
+</Wix>
