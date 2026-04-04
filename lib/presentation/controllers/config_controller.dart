@@ -654,6 +654,30 @@ class ConfigController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Extrai todas as datas no formato DD/MM/YYYY de um texto resolvido.
+  static final _dateInTextPattern = RegExp(r'(\d{2})/(\d{2})/(\d{4})');
+
+  List<DateTime> _extractDatesFromText(String text) {
+    final dates = <DateTime>[];
+    for (final m in _dateInTextPattern.allMatches(text)) {
+      final day = int.tryParse(m.group(1)!);
+      final month = int.tryParse(m.group(2)!);
+      final year = int.tryParse(m.group(3)!);
+      if (day != null &&
+          month != null &&
+          year != null &&
+          month >= 1 &&
+          month <= 12 &&
+          day >= 1 &&
+          day <= 31) {
+        try {
+          dates.add(DateTime(year, month, day));
+        } catch (_) {}
+      }
+    }
+    return dates;
+  }
+
   /// Verifica se o nome resolvido de uma atividade contém alguma data de feriado.
   bool activityMatchesHoliday(String resolvedName) {
     if (_current == null || _current!.holidayDates.isEmpty) return false;
@@ -709,15 +733,31 @@ class ConfigController extends ChangeNotifier {
   }
 
   /// Verifica se a data de abertura da atividade cai em dia diferente do esperado.
+  /// Também verifica datas extraídas do texto resolvido.
   /// Retorna true se há conflito (amarelo).
   bool activityWeekdayMismatch(
     ActivityEntry activity,
-    DateTime sectionRefDate,
-  ) {
+    DateTime sectionRefDate, {
+    String? resolvedName,
+  }) {
     if (activity.expectedWeekday == null) return false;
+
+    // Verificar pela data de abertura
     final openDate = activity.computeOpenDate(sectionRefDate);
-    if (openDate == null) return false;
-    final wd = effectiveWeekday(openDate);
-    return wd != activity.expectedWeekday;
+    if (openDate != null) {
+      final wd = effectiveWeekday(openDate);
+      if (wd != activity.expectedWeekday) return true;
+    }
+
+    // Verificar por datas no texto resolvido
+    if (resolvedName != null) {
+      final textDates = _extractDatesFromText(resolvedName);
+      for (final date in textDates) {
+        final wd = effectiveWeekday(date);
+        if (wd != activity.expectedWeekday) return true;
+      }
+    }
+
+    return false;
   }
 }

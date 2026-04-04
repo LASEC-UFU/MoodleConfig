@@ -1220,6 +1220,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
     final isWeekdayMismatch = ctrl.activityWeekdayMismatch(
       activity,
       sectionRefDate,
+      resolvedName: resolvedName,
     );
 
     // During multi-drag, hide all selected items (they appear in the feedback)
