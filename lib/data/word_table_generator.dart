@@ -1,3 +1,4 @@
+import 'package:config_moodle/core/utils/macro_resolver.dart';
 import 'package:config_moodle/domain/entities/course_config.dart';
 import 'package:intl/intl.dart';
 
@@ -69,41 +70,148 @@ class WordTableGenerator {
   ) {
     final rows = <WordTableRow>[];
     for (final section in config.sections) {
-      final text = _joinText([
-        section.name,
-        section.moodleDescription ?? '',
-        ...section.activities.map((a) => a.name),
-      ]);
-      final inferredModality = _inferModality(text) ?? options.preset.modality;
+      final resolvedSectionName = _cleanText(
+        MacroResolver.resolve(
+          section.name,
+          config.semesterStartDate,
+          section.date,
+        ),
+      );
+      final resolvedDescription = _cleanText(
+        MacroResolver.resolve(
+          section.moodleDescription ?? '',
+          config.semesterStartDate,
+          section.date,
+        ),
+      );
+      final activityInfos = section.activities.map((activity) {
+        final openDate =
+            activity.computeOpenDate(section.date) ??
+            activity.openDate ??
+            section.date;
+        final closeDate =
+            activity.computeCloseDate(section.date) ?? activity.closeDate;
+        final name = _cleanText(
+          MacroResolver.resolve(
+            activity.name,
+            config.semesterStartDate,
+            openDate,
+            openDate,
+            closeDate,
+          ),
+        );
+        return (
+          date: _dateOnly(openDate),
+          name: name,
+          modality: activity.modality,
+        );
+      }).toList();
 
-      if (options.onlyMatchingModality &&
-          options.preset != WordTablePreset.all &&
-          !_sameLabel(inferredModality, options.preset.modality)) {
+      final hasExplicitModality = activityInfos.any(
+        (activity) =>
+            activity.modality != null && activity.modality!.isNotEmpty,
+      );
+      final selectedActivityInfos =
+          options.onlyMatchingModality &&
+              options.preset != WordTablePreset.all &&
+              hasExplicitModality
+          ? activityInfos
+                .where(
+                  (activity) =>
+                      activity.modality != null &&
+                      _sameLabel(activity.modality!, options.preset.modality),
+                )
+                .toList()
+          : activityInfos;
+
+      if (hasExplicitModality && selectedActivityInfos.isEmpty) {
         continue;
       }
 
-      final subjectParts = [
-        section.name,
-        if (options.includeActivitiesInSubject)
-          ...section.activities.map((a) => a.name),
-      ].where((s) => s.trim().isNotEmpty).toList();
-
-      rows.add(
-        WordTableRow(
+      if (selectedActivityInfos.isEmpty) {
+        _addRow(
+          rows,
+          options,
           date: section.date,
-          modality: inferredModality.isEmpty
-              ? options.preset.modality
-              : inferredModality,
-          classGroup: _inferClassGroup(text, options.preset.defaultClassGroup),
-          taughtSubject: subjectParts.join(' - '),
-          activities: section.activities.map((a) => a.name).join(' | '),
-          moodleDescription: section.moodleDescription ?? '',
-          isSpecial: _isSpecial(text),
-        ),
-      );
+          sectionName: resolvedSectionName,
+          description: resolvedDescription,
+          activityInfos: const [],
+        );
+        continue;
+      }
+
+      final activitiesByDate =
+          <DateTime, List<({String name, String? modality})>>{};
+      for (final activity in selectedActivityInfos) {
+        activitiesByDate.putIfAbsent(activity.date, () => []).add((
+          name: activity.name,
+          modality: activity.modality,
+        ));
+      }
+
+      for (final entry in activitiesByDate.entries) {
+        _addRow(
+          rows,
+          options,
+          date: entry.key,
+          sectionName: resolvedSectionName,
+          description: resolvedDescription,
+          activityInfos: entry.value,
+        );
+      }
     }
     rows.sort((a, b) => a.date.compareTo(b.date));
     return rows;
+  }
+
+  static void _addRow(
+    List<WordTableRow> rows,
+    WordTableOptions options, {
+    required DateTime date,
+    required String sectionName,
+    required String description,
+    required List<({String name, String? modality})> activityInfos,
+  }) {
+    final resolvedActivities = activityInfos
+        .map((activity) => activity.name)
+        .toList();
+
+    final text = _joinText([sectionName, description, ...resolvedActivities]);
+    String? explicitModality;
+    for (final activity in activityInfos) {
+      final value = activity.modality;
+      if (value != null && value.trim().isNotEmpty) {
+        explicitModality = value;
+        break;
+      }
+    }
+    final inferredModality =
+        explicitModality ?? _inferModality(text) ?? options.preset.modality;
+
+    if (options.onlyMatchingModality &&
+        options.preset != WordTablePreset.all &&
+        !_sameLabel(inferredModality, options.preset.modality)) {
+      return;
+    }
+
+    final subjectParts = [
+      sectionName,
+      if (options.includeActivitiesInSubject) ...resolvedActivities,
+    ].where((s) => s.trim().isNotEmpty).toList();
+
+    rows.add(
+      WordTableRow(
+        date: _dateOnly(date),
+        modality: inferredModality.isEmpty
+            ? options.preset.modality
+            : inferredModality,
+        classGroup: _inferClassGroup(text, options.preset.defaultClassGroup),
+        taughtSubject: subjectParts.join(' - '),
+        activities: resolvedActivities.join(' | '),
+        moodleDescription: description,
+        isSpecial: _isSpecial(text),
+      ),
+    );
   }
 
   static String generateTsv(CourseConfig config, WordTableOptions options) {
@@ -206,6 +314,34 @@ class WordTableGenerator {
 
   static String _joinText(Iterable<String> parts) {
     return parts.where((s) => s.trim().isNotEmpty).join(' ');
+  }
+
+  static DateTime _dateOnly(DateTime value) {
+    return DateTime(value.year, value.month, value.day);
+  }
+
+  static String _cleanText(String value) {
+    if (value.trim().isEmpty) return '';
+    return _decodeHtmlEntities(value)
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'</p\s*>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll('\u00a0', ' ')
+        .replaceAll(RegExp(r'[ \t]+'), ' ')
+        .replaceAll(RegExp(r'\s*\n\s*'), '\n')
+        .replaceAll(RegExp(r'\n{2,}'), '\n')
+        .trim();
+  }
+
+  static String _decodeHtmlEntities(String value) {
+    return value
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'");
   }
 
   static bool _sameLabel(String a, String b) => _normalize(a) == _normalize(b);

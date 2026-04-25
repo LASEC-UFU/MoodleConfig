@@ -52,10 +52,15 @@ void main() {
               activityType: 'URL',
               openOffsetDays: 0,
               moodleModuleId: 20,
+              moodleModuleName: 'url',
+              modality: 'Prática',
+              expectedWeekday: 1,
             ),
           ],
         ),
       ],
+      holidayDates: [DateTime(2026, 2, 18)],
+      daySwapDates: {DateTime(2026, 2, 19): 3},
     );
     await datasource.save(config);
 
@@ -65,6 +70,20 @@ void main() {
     expect(imported, hasLength(1));
     expect(imported.single.sections, hasLength(1));
     expect(imported.single.sections.single.activities, hasLength(1));
+    expect(
+      imported.single.sections.single.activities.single.modality,
+      'Prática',
+    );
+    expect(
+      imported.single.sections.single.activities.single.moodleModuleName,
+      'url',
+    );
+    expect(
+      imported.single.sections.single.activities.single.expectedWeekday,
+      1,
+    );
     expect(imported.single.moodleCourseId, 123);
+    expect(imported.single.holidayDates, [DateTime(2026, 2, 18)]);
+    expect(imported.single.daySwapDates, {DateTime(2026, 2, 19): 3});
   });
 }

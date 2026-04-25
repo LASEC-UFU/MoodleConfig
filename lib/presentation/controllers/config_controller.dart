@@ -267,6 +267,7 @@ class ConfigController extends ChangeNotifier {
     int? openTimeMinutes,
     int? closeTimeMinutes,
     int? moodleModuleId,
+    String? modality,
   }) async {
     if (_current == null) return;
     final section = _current!.sections.firstWhere((s) => s.id == sectionId);
@@ -282,6 +283,7 @@ class ConfigController extends ChangeNotifier {
       closeOffsetDays: closeOffsetDays,
       openTimeMinutes: openTimeMinutes,
       closeTimeMinutes: closeTimeMinutes,
+      modality: modality,
     );
     // Computar datas absolutas para export/compat
     final withDates = activity.copyWith(
@@ -310,6 +312,7 @@ class ConfigController extends ChangeNotifier {
     Object? closeTimeMinutes = _sentinel,
     Object? moodleModuleId = _sentinel,
     Object? moodleModuleName = _sentinel,
+    Object? modality = _sentinel,
     int? visibility,
     Object? expectedWeekday = _sentinel,
   }) async {
@@ -342,6 +345,7 @@ class ConfigController extends ChangeNotifier {
           moodleModuleName: moodleModuleName == _sentinel
               ? a.moodleModuleName
               : moodleModuleName as String?,
+          modality: modality == _sentinel ? a.modality : modality as String?,
           visibility: visibility,
           expectedWeekday: expectedWeekday == _sentinel
               ? a.expectedWeekday

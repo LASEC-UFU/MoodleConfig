@@ -1,21 +1,20 @@
-import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
 import 'package:config_moodle/data/template_generator.dart';
 import 'package:config_moodle/data/web_xlsx_picker.dart';
-import 'package:config_moodle/data/word_table_generator.dart';
 import 'package:config_moodle/domain/entities/course_config.dart';
 import 'package:config_moodle/domain/entities/moodle_entities.dart';
 import 'package:config_moodle/presentation/controllers/config_controller.dart';
 import 'package:config_moodle/presentation/controllers/auth_controller.dart';
 import 'package:config_moodle/presentation/controllers/sync_controller.dart';
 import 'package:config_moodle/presentation/widgets/common_widgets.dart';
+import 'package:config_moodle/presentation/widgets/word_table_dialog.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -302,7 +301,7 @@ class _HomePageState extends State<HomePage> {
                   } else if (value == 'export') {
                     _exportSpreadsheet(context, config.id);
                   } else if (value == 'word') {
-                    _showWordTableDialog(context, config);
+                    showWordTableDialog(context, config);
                   } else if (value == 'sync') {
                     context.push('/sync/${config.id}');
                   }
@@ -393,7 +392,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               const Spacer(),
               InkWell(
-                onTap: () => _showWordTableDialog(context, config),
+                onTap: () => showWordTableDialog(context, config),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
@@ -911,16 +910,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _showWordTableDialog(
-    BuildContext context,
-    CourseConfig config,
-  ) async {
-    await showDialog<void>(
-      context: context,
-      builder: (_) => _WordTableDialog(config: config),
-    );
-  }
-
   Future<void> _downloadTemplate(BuildContext context) async {
     try {
       final bytes = TemplateGenerator.generateTemplate();
@@ -1167,180 +1156,6 @@ class _HomePageState extends State<HomePage> {
 }
 
 // ── Helper classes para importação do Moodle ──────────────────────────────
-
-class _WordTableDialog extends StatefulWidget {
-  final CourseConfig config;
-
-  const _WordTableDialog({required this.config});
-
-  @override
-  State<_WordTableDialog> createState() => _WordTableDialogState();
-}
-
-class _WordTableDialogState extends State<_WordTableDialog> {
-  WordTablePreset _preset = WordTablePreset.practice;
-  bool _onlyMatchingModality = true;
-  bool _includeActivitiesInSubject = false;
-  final Set<WordTableColumn> _columns = {
-    WordTableColumn.date,
-    WordTableColumn.modality,
-    WordTableColumn.classGroup,
-    WordTableColumn.taughtSubject,
-  };
-
-  WordTableOptions get _options => WordTableOptions(
-    preset: _preset,
-    columns: _columns,
-    onlyMatchingModality: _onlyMatchingModality,
-    includeActivitiesInSubject: _includeActivitiesInSubject,
-  );
-
-  int get _rowCount =>
-      WordTableGenerator.buildRows(widget.config, _options).length;
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Tabela para Word'),
-      content: SizedBox(
-        width: 520,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SegmentedButton<WordTablePreset>(
-                segments: const [
-                  ButtonSegment(
-                    value: WordTablePreset.practice,
-                    label: Text('Prática'),
-                    icon: Icon(Icons.science_outlined),
-                  ),
-                  ButtonSegment(
-                    value: WordTablePreset.theory,
-                    label: Text('Teórica'),
-                    icon: Icon(Icons.menu_book_outlined),
-                  ),
-                  ButtonSegment(
-                    value: WordTablePreset.all,
-                    label: Text('Todas'),
-                    icon: Icon(Icons.table_rows_outlined),
-                  ),
-                ],
-                selected: {_preset},
-                onSelectionChanged: (value) {
-                  setState(() => _preset = value.first);
-                },
-              ),
-              const SizedBox(height: 16),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _onlyMatchingModality,
-                title: const Text('Filtrar pela modalidade escolhida'),
-                subtitle: Text('Linhas encontradas: $_rowCount'),
-                onChanged: (value) {
-                  setState(() => _onlyMatchingModality = value);
-                },
-              ),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _includeActivitiesInSubject,
-                title: const Text('Juntar atividades na matéria'),
-                controlAffinity: ListTileControlAffinity.leading,
-                onChanged: (value) {
-                  setState(() => _includeActivitiesInSubject = value ?? false);
-                },
-              ),
-              const Divider(color: AppTheme.divider),
-              const Text(
-                'Colunas',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                children: WordTableColumn.values.map((column) {
-                  final selected = _columns.contains(column);
-                  return FilterChip(
-                    label: Text(column.label),
-                    selected: selected,
-                    onSelected: (value) {
-                      setState(() {
-                        if (value) {
-                          _columns.add(column);
-                        } else if (_columns.length > 1) {
-                          _columns.remove(column);
-                        }
-                      });
-                    },
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Fechar'),
-        ),
-        OutlinedButton.icon(
-          onPressed: _rowCount == 0 ? null : _saveHtml,
-          icon: const Icon(Icons.save_alt),
-          label: const Text('Salvar HTML'),
-        ),
-        ElevatedButton.icon(
-          onPressed: _rowCount == 0 ? null : _copyTable,
-          icon: const Icon(Icons.content_copy),
-          label: const Text('Copiar'),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _copyTable() async {
-    final text = WordTableGenerator.generateTsv(widget.config, _options);
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Tabela copiada. Cole no Word.'),
-        backgroundColor: AppTheme.accentGreen,
-      ),
-    );
-  }
-
-  Future<void> _saveHtml() async {
-    final html = WordTableGenerator.generateHtml(widget.config, _options);
-    final bytes = Uint8List.fromList(utf8.encode(html));
-    final filename = _safeFileName(
-      '${widget.config.name}_${_preset.label}_word.html',
-    );
-    final result = await FilePicker.platform.saveFile(
-      dialogTitle: 'Salvar tabela para Word',
-      fileName: filename,
-      type: FileType.custom,
-      allowedExtensions: ['html'],
-      bytes: bytes,
-    );
-    if (result == null || !mounted) return;
-    if (!kIsWeb) {
-      File(result).writeAsBytesSync(bytes);
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Tabela HTML salva com sucesso!'),
-        backgroundColor: AppTheme.accentGreen,
-      ),
-    );
-  }
-
-  String _safeFileName(String name) {
-    return name.replaceAll(RegExp(r'[<>:"/\\|?*]+'), '_');
-  }
-}
 
 class _MoodleImportResult {
   final MoodleCourse course;

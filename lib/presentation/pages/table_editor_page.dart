@@ -13,6 +13,7 @@ import 'package:config_moodle/core/utils/macro_resolver.dart';
 import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 import 'package:config_moodle/presentation/widgets/inline_edit_text.dart';
 import 'package:config_moodle/presentation/widgets/inline_link_picker.dart';
+import 'package:config_moodle/presentation/widgets/word_table_dialog.dart';
 
 class TableEditorPage extends StatefulWidget {
   final String courseConfigId;
@@ -391,9 +392,22 @@ class _TableEditorPageState extends State<TableEditorPage> {
               ),
             ),
           ),
-          if (config != null && auth.isLoggedIn) ...[
+          if (config != null) ...[
             _buildCourseChip(context, config, ctrl, auth),
             const SizedBox(width: 8),
+            Tooltip(
+              message: 'Tabela Word',
+              child: GradientButton(
+                icon: Icons.content_paste,
+                label: '',
+                compact: true,
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF7E57C2), Color(0xFF5E35B1)],
+                ),
+                onPressed: () => showWordTableDialog(context, config),
+              ),
+            ),
+            const SizedBox(width: 4),
             if (_evaluating)
               const SizedBox(
                 width: 24,
@@ -403,7 +417,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                   color: AppTheme.accent,
                 ),
               )
-            else ...[
+            else if (auth.isLoggedIn) ...[
               Tooltip(
                 message: 'Desvincular Todos',
                 child: GradientButton(
@@ -444,20 +458,22 @@ class _TableEditorPageState extends State<TableEditorPage> {
                 ),
               ),
               const SizedBox(width: 4),
-              Tooltip(
-                message: 'Datas Especiais',
-                child: GradientButton(
-                  icon: Icons.event_busy,
-                  label: '',
-                  compact: true,
-                  gradient: LinearGradient(
-                    colors: ctrl.holidayDates.isEmpty
-                        ? [const Color(0xFF78909C), const Color(0xFF546E7A)]
-                        : [const Color(0xFFFF7043), const Color(0xFFE64A19)],
-                  ),
-                  onPressed: () => _showHolidayDatesDialog(context, ctrl),
+            ],
+            Tooltip(
+              message: 'Datas Especiais',
+              child: GradientButton(
+                icon: Icons.event_busy,
+                label: '',
+                compact: true,
+                gradient: LinearGradient(
+                  colors: ctrl.holidayDates.isEmpty
+                      ? [const Color(0xFF78909C), const Color(0xFF546E7A)]
+                      : [const Color(0xFFFF7043), const Color(0xFFE64A19)],
                 ),
+                onPressed: () => _showHolidayDatesDialog(context, ctrl),
               ),
+            ),
+            if (auth.isLoggedIn) ...[
               const SizedBox(width: 4),
               Tooltip(
                 message: 'Avaliar',
@@ -471,21 +487,43 @@ class _TableEditorPageState extends State<TableEditorPage> {
                   onPressed: () => _runEvaluation(config, auth),
                 ),
               ),
+              const SizedBox(width: 4),
             ],
-            const SizedBox(width: 8),
-            Opacity(
-              opacity: _evaluated ? 1.0 : 0.4,
-              child: Tooltip(
+            if (auth.isLoggedIn) ...[
+              Tooltip(
                 message: 'Sincronizar',
-                child: GradientButton(
-                  icon: Icons.sync,
-                  label: '',
-                  compact: true,
-                  gradient: AppTheme.accentGradient,
-                  onPressed: _evaluated ? () => _runSync(config, auth) : null,
+                child: Opacity(
+                  opacity: _evaluated ? 1.0 : 0.4,
+                  child: GradientButton(
+                    icon: Icons.sync,
+                    label: '',
+                    compact: true,
+                    gradient: AppTheme.accentGradient,
+                    onPressed: _evaluated ? () => _runSync(config, auth) : null,
+                  ),
                 ),
               ),
-            ),
+            ] else
+              Tooltip(
+                message: 'Conecte ao Moodle para avaliar e sincronizar',
+                child: GradientButton(
+                  icon: Icons.cloud_off,
+                  label: '',
+                  compact: true,
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF546E7A), Color(0xFF37474F)],
+                  ),
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Conecte ao Moodle para avaliar e sincronizar.',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
           ],
         ],
       ),
@@ -2104,8 +2142,15 @@ class _TableEditorPageState extends State<TableEditorPage> {
     final openOffsetCtrl = TextEditingController();
     final closeOffsetCtrl = TextEditingController();
     String type = 'Tarefa';
+    String? modality;
     int? openTimeMinutes;
     int? closeTimeMinutes;
+
+    const modalityItems = [
+      DropdownMenuItem<String?>(value: null, child: Text('Não informado')),
+      DropdownMenuItem<String?>(value: 'Prática', child: Text('Prática')),
+      DropdownMenuItem<String?>(value: 'Teórica', child: Text('Teórica')),
+    ];
 
     showDialog(
       context: context,
@@ -2142,6 +2187,17 @@ class _TableEditorPageState extends State<TableEditorPage> {
                       dropdownColor: AppTheme.bgSurface,
                       items: _activityTypes,
                       onChanged: (v) => setState(() => type = v!),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String?>(
+                      initialValue: modality,
+                      decoration: const InputDecoration(
+                        labelText: 'Modalidade',
+                        helperText: 'Usada na tabela para Word',
+                      ),
+                      dropdownColor: AppTheme.bgSurface,
+                      items: modalityItems,
+                      onChanged: (v) => setState(() => modality = v),
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -2237,6 +2293,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                       closeOffsetDays: int.tryParse(closeOffsetCtrl.text),
                       openTimeMinutes: withTime ? openTimeMinutes : null,
                       closeTimeMinutes: withTime ? closeTimeMinutes : null,
+                      modality: modality,
                     );
                     Navigator.pop(context);
                   }
@@ -2267,6 +2324,13 @@ class _TableEditorPageState extends State<TableEditorPage> {
     int? openTimeMinutes = activity.openTimeMinutes;
     int? closeTimeMinutes = activity.closeTimeMinutes;
     int? expectedWeekday = activity.expectedWeekday;
+    String? modality = activity.modality;
+
+    const modalityItems = [
+      DropdownMenuItem<String?>(value: null, child: Text('Não informado')),
+      DropdownMenuItem<String?>(value: 'Prática', child: Text('Prática')),
+      DropdownMenuItem<String?>(value: 'Teórica', child: Text('Teórica')),
+    ];
 
     const weekdayItems = [
       DropdownMenuItem<int?>(value: null, child: Text('Nenhum')),
@@ -2307,6 +2371,32 @@ class _TableEditorPageState extends State<TableEditorPage> {
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary,
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.category_outlined,
+                          color: AppTheme.accent,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: DropdownButtonFormField<String?>(
+                            initialValue: modality,
+                            decoration: const InputDecoration(
+                              labelText: 'Modalidade',
+                              helperText: 'Usada na tabela para Word',
+                              helperStyle: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 11,
+                              ),
+                            ),
+                            items: modalityItems,
+                            onChanged: (v) => setState(() => modality = v),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -2393,7 +2483,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: DropdownButtonFormField<int?>(
-                            value: expectedWeekday,
+                            initialValue: expectedWeekday,
                             decoration: const InputDecoration(
                               labelText: 'Dia da semana esperado',
                               helperText: 'Se não bater, fica amarelo',
@@ -2428,6 +2518,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                     openTimeMinutes: withTime ? openTimeMinutes : null,
                     closeTimeMinutes: withTime ? closeTimeMinutes : null,
                     expectedWeekday: expectedWeekday,
+                    modality: modality,
                   );
                   Navigator.pop(context);
                 },

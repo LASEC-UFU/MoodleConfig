@@ -39,6 +39,155 @@ void main() {
     expect(html, contains('class="theory special"'));
     expect(html, contains('2ª Prova'));
   });
+
+  test('resolves date macros and strips html markup', () {
+    final now = DateTime(2026);
+    final config = CourseConfig(
+      id: 'cfg-html',
+      name: 'Teste HTML',
+      semesterStartDate: now,
+      createdAt: now,
+      updatedAt: now,
+      sections: [
+        SectionEntry(
+          id: 's1',
+          orderIndex: 1,
+          name: 'BLOCO 01 (Inicia: <DD/MM/YYYY>)',
+          referenceDaysOffset: 0,
+          date: DateTime(2026, 2, 16),
+          offsetDays: 0,
+          moodleDescription:
+              '<p>Avaliação com <strong>presença</strong> em <DD/MM/YYYY + 7>.</p>',
+        ),
+      ],
+    );
+
+    final text = WordTableGenerator.generateTsv(
+      config,
+      const WordTableOptions(
+        preset: WordTablePreset.all,
+        columns: {
+          WordTableColumn.date,
+          WordTableColumn.taughtSubject,
+          WordTableColumn.moodleDescription,
+        },
+      ),
+    );
+
+    expect(text, contains('BLOCO 01 (Inicia: 16/02/2026)'));
+    expect(text, contains('Avaliação com presença em 23/02/2026.'));
+    expect(text, isNot(contains('<strong>')));
+    expect(text, isNot(contains('<DD/MM/YYYY')));
+  });
+
+  test('uses explicit activity modality before text inference', () {
+    final now = DateTime(2026);
+    final config = CourseConfig(
+      id: 'cfg-modality',
+      name: 'Teste Modalidade',
+      semesterStartDate: now,
+      createdAt: now,
+      updatedAt: now,
+      sections: [
+        SectionEntry(
+          id: 's1',
+          orderIndex: 1,
+          name: 'BLOCO 01',
+          referenceDaysOffset: 0,
+          date: DateTime(2026, 2, 16),
+          offsetDays: 0,
+          activities: [
+            ActivityEntry(
+              id: 'a1',
+              name: 'Aula de laboratório',
+              activityType: 'URL',
+              modality: 'Prática',
+            ),
+            ActivityEntry(
+              id: 'a2',
+              name: 'Aula de quadro',
+              activityType: 'URL',
+              modality: 'Teórica',
+            ),
+          ],
+        ),
+      ],
+    );
+
+    final text = WordTableGenerator.generateTsv(
+      config,
+      const WordTableOptions(
+        preset: WordTablePreset.practice,
+        columns: {
+          WordTableColumn.modality,
+          WordTableColumn.taughtSubject,
+          WordTableColumn.activities,
+        },
+      ),
+    );
+
+    expect(text, contains('Prática\tBLOCO 01\tAula de laboratório'));
+    expect(text, isNot(contains('Aula de quadro')));
+  });
+
+  test('splits activities by their real opening date', () {
+    final now = DateTime(2026);
+    final config = CourseConfig(
+      id: 'cfg-dates',
+      name: 'Teste Datas',
+      semesterStartDate: now,
+      createdAt: now,
+      updatedAt: now,
+      sections: [
+        SectionEntry(
+          id: 's1',
+          orderIndex: 1,
+          name: 'Teorica Quarta 02',
+          referenceDaysOffset: 0,
+          date: DateTime(2026, 4, 29),
+          offsetDays: 0,
+          activities: [
+            ActivityEntry(
+              id: 'a1',
+              name: 'Questionario 02 (Inicia: <DD/MM/YYYY>)',
+              activityType: 'Quiz',
+              modality: 'Teorica',
+              openOffsetDays: 0,
+            ),
+            ActivityEntry(
+              id: 'a2',
+              name: 'Teorica Quinta 02 (Realizar-se-a: <DD/MM/YYYY>)',
+              activityType: 'URL',
+              modality: 'Teorica',
+              openOffsetDays: 1,
+            ),
+          ],
+        ),
+      ],
+    );
+
+    final text = WordTableGenerator.generateTsv(
+      config,
+      const WordTableOptions(
+        preset: WordTablePreset.theory,
+        columns: {WordTableColumn.date, WordTableColumn.activities},
+      ),
+    );
+
+    expect(text, contains('29/04/2026\tQuestionario 02 (Inicia: 29/04/2026)'));
+    expect(
+      text,
+      contains('30/04/2026\tTeorica Quinta 02 (Realizar-se-a: 30/04/2026)'),
+    );
+    expect(
+      text,
+      isNot(
+        contains(
+          '29/04/2026\tQuestionario 02 (Inicia: 29/04/2026) | Teorica Quinta',
+        ),
+      ),
+    );
+  });
 }
 
 CourseConfig _sampleConfig() {

@@ -100,13 +100,23 @@ class ConfigRepositoryImpl implements IConfigRepository {
   List<CourseConfig> _parseExcelBytes(List<int> bytes) {
     final excel = Excel.decodeBytes(bytes);
     final configs = <CourseConfig>[];
+    final holidayDates = _parseHolidayDates(excel);
+    final daySwapDates = _parseDaySwapDates(excel);
 
     for (final sheetName in excel.tables.keys) {
+      if (sheetName == '_Datas Especiais' || sheetName == '_Trocas de Dia') {
+        continue;
+      }
       final sheet = excel.tables[sheetName]!;
       final rows = sheet.rows;
       if (rows.isEmpty) continue;
 
-      final config = _parseSheet(sheetName, rows);
+      final config = _parseSheet(
+        sheetName,
+        rows,
+        holidayDates: holidayDates,
+        daySwapDates: daySwapDates,
+      );
       if (config != null) configs.add(config);
     }
 
@@ -203,7 +213,12 @@ class ConfigRepositoryImpl implements IConfigRepository {
   // ── Parsing de Sheet ─────────────────────────────────────────────────────
 
   /// Parseia uma sheet e retorna um CourseConfig, ou null se não reconhecida.
-  CourseConfig? _parseSheet(String sheetName, List<List<Data?>> rawRows) {
+  CourseConfig? _parseSheet(
+    String sheetName,
+    List<List<Data?>> rawRows, {
+    List<DateTime> holidayDates = const [],
+    Map<DateTime, int> daySwapDates = const {},
+  }) {
     if (rawRows.isEmpty) return null;
 
     // Cache de valores numéricos resolvidos, indexado por referência Excel
@@ -285,9 +300,12 @@ class ConfigRepositoryImpl implements IConfigRepository {
         colHoraTermino,
         colNome,
         colTipo,
+        colModalidade,
         colVisivel,
         colDesc,
-        colMoodleId;
+        colMoodleId,
+        colMoodleModuleName,
+        colExpectedWeekday;
     for (int c = 0; c < hdrTexts.length; c++) {
       final h = hdrTexts[c].trim();
       if (h == 'ordem') colOrdem = c;
@@ -305,9 +323,12 @@ class ConfigRepositoryImpl implements IConfigRepository {
       }
       if (h == 'nome') colNome = c;
       if (h == 'tipo') colTipo = c;
+      if (h == 'modalidade') colModalidade = c;
       if (h.contains('visivel')) colVisivel = c;
       if (h.contains('descricao')) colDesc = c;
       if (h.contains('moodle id')) colMoodleId = c;
+      if (h.contains('moodle module name')) colMoodleModuleName = c;
+      if (h.contains('dia semana esperado')) colExpectedWeekday = c;
     }
 
     if (colNome == null || colTipo == null || colDiasInicio == null) {
@@ -347,10 +368,13 @@ class ConfigRepositoryImpl implements IConfigRepository {
       final ordem = cellAt(colOrdem);
       final nome = cellAt(colNome);
       final tipo = cellAt(colTipo);
+      final modalidade = cellAt(colModalidade);
       final visivel = cellAt(colVisivel);
       final desc = cellAt(colDesc);
       final moodleIdStr = cellAt(colMoodleId);
       final moodleId = _parseIntText(moodleIdStr);
+      final moodleModuleName = cellAt(colMoodleModuleName);
+      final expectedWeekday = _parseIntText(cellAt(colExpectedWeekday));
 
       final openStr = cellAt(colDiasInicio);
       final openOffset = _parseIntText(openStr);
@@ -406,7 +430,12 @@ class ConfigRepositoryImpl implements IConfigRepository {
           openTimeMinutes: openTimeMinutes,
           closeTimeMinutes: closeTimeMinutes,
           moodleModuleId: moodleId,
+          moodleModuleName: moodleModuleName.isNotEmpty
+              ? moodleModuleName
+              : null,
+          modality: modalidade.isNotEmpty ? modalidade : null,
           visibility: activityVisibility,
+          expectedWeekday: expectedWeekday,
         );
         final withDates = activity.copyWith(
           openDate: activity.computeOpenDate(sectionRefDate),
@@ -468,6 +497,8 @@ class ConfigRepositoryImpl implements IConfigRepository {
       createdAt: now,
       updatedAt: now,
       sections: sections,
+      holidayDates: holidayDates,
+      daySwapDates: daySwapDates,
     );
   }
 
@@ -480,6 +511,59 @@ class ConfigRepositoryImpl implements IConfigRepository {
     final idx = sections.indexOf(section);
     if (idx < 0) return;
     sections[idx] = section.copyWith(activities: [...section.activities, act]);
+  }
+
+  List<DateTime> _parseHolidayDates(Excel excel) {
+    final sheet = excel.tables['_Datas Especiais'];
+    if (sheet == null) return const [];
+    final dates = <DateTime>[];
+    for (final row in sheet.rows.skip(1)) {
+      if (row.isEmpty) continue;
+      final value = row.first?.value;
+      final serial = _resolveNumeric(value, {});
+      DateTime? date;
+      if (serial != null && serial > 40000) {
+        date = DateCalculator.fromExcelSerial(serial);
+      } else {
+        date = _tryParseDate(_cellText(value));
+      }
+      if (date != null) {
+        dates.add(DateTime(date.year, date.month, date.day));
+      }
+    }
+    return dates;
+  }
+
+  Map<DateTime, int> _parseDaySwapDates(Excel excel) {
+    final sheet = excel.tables['_Trocas de Dia'];
+    if (sheet == null) return const {};
+    final swaps = <DateTime, int>{};
+    for (final row in sheet.rows.skip(1)) {
+      if (row.length < 2) continue;
+      final value = row[0]?.value;
+      final serial = _resolveNumeric(value, {});
+      DateTime? date;
+      if (serial != null && serial > 40000) {
+        date = DateCalculator.fromExcelSerial(serial);
+      } else {
+        date = _tryParseDate(_cellText(value));
+      }
+      final weekday = _parseIntText(_cellText(row[1]?.value));
+      if (date != null && weekday != null && weekday >= 1 && weekday <= 7) {
+        swaps[DateTime(date.year, date.month, date.day)] = weekday;
+      }
+    }
+    return swaps;
+  }
+
+  DateTime? _tryParseDate(String text) {
+    final parts = text.trim().split('/');
+    if (parts.length != 3) return null;
+    final day = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final year = int.tryParse(parts[2]);
+    if (day == null || month == null || year == null) return null;
+    return DateTime(year, month, day);
   }
 
   @override
@@ -519,9 +603,12 @@ class ConfigRepositoryImpl implements IConfigRepository {
       TextCellValue('Hora Término'),
       TextCellValue('Nome'),
       TextCellValue('Tipo'),
+      TextCellValue('Modalidade'),
       TextCellValue('Visível'),
       TextCellValue('Descrição Moodle'),
       TextCellValue('Moodle ID'),
+      TextCellValue('Moodle Module Name'),
+      TextCellValue('Dia Semana Esperado'),
     ]);
 
     for (final section in config.sections) {
@@ -533,11 +620,14 @@ class ConfigRepositoryImpl implements IConfigRepository {
         TextCellValue(''),
         TextCellValue(section.name),
         TextCellValue('Seção'),
+        TextCellValue(''),
         TextCellValue(section.visible ? 'Sim' : 'Não'),
         TextCellValue(section.moodleDescription ?? ''),
         section.moodleSectionId != null
             ? IntCellValue(section.moodleSectionId!)
             : TextCellValue(''),
+        TextCellValue(''),
+        TextCellValue(''),
       ]);
 
       for (final activity in section.activities) {
@@ -557,6 +647,7 @@ class ConfigRepositoryImpl implements IConfigRepository {
               : TextCellValue(''),
           TextCellValue(activity.name),
           TextCellValue(activity.activityType),
+          TextCellValue(activity.modality ?? ''),
           TextCellValue(switch (activity.visibility) {
             0 => 'Não',
             2 => 'Stealth',
@@ -566,6 +657,36 @@ class ConfigRepositoryImpl implements IConfigRepository {
           activity.moodleModuleId != null
               ? IntCellValue(activity.moodleModuleId!)
               : TextCellValue(''),
+          TextCellValue(activity.moodleModuleName ?? ''),
+          activity.expectedWeekday != null
+              ? IntCellValue(activity.expectedWeekday!)
+              : TextCellValue(''),
+        ]);
+      }
+    }
+
+    if (config.holidayDates.isNotEmpty) {
+      final holidays = excel['_Datas Especiais'];
+      holidays.appendRow([TextCellValue('Data')]);
+      for (final date in config.holidayDates) {
+        holidays.appendRow([
+          DoubleCellValue(DateCalculator.toExcelSerial(date)),
+        ]);
+      }
+    }
+
+    if (config.daySwapDates.isNotEmpty) {
+      final swaps = excel['_Trocas de Dia'];
+      swaps.appendRow([
+        TextCellValue('Data'),
+        TextCellValue('Dia Semana Efetivo'),
+      ]);
+      final entries = config.daySwapDates.entries.toList()
+        ..sort((a, b) => a.key.compareTo(b.key));
+      for (final entry in entries) {
+        swaps.appendRow([
+          DoubleCellValue(DateCalculator.toExcelSerial(entry.key)),
+          IntCellValue(entry.value),
         ]);
       }
     }

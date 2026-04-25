@@ -194,6 +194,7 @@ class ActivityEntry {
   final int? closeTimeMinutes;
   final int? moodleModuleId;
   final String? moodleModuleName;
+  final String? modality; // Prática, Teórica, etc.
 
   /// 0=oculto, 1=visível, 2=disponível mas não mostrar (stealth)
   final int visibility;
@@ -214,6 +215,7 @@ class ActivityEntry {
     this.closeTimeMinutes,
     this.moodleModuleId,
     this.moodleModuleName,
+    this.modality,
     this.visibility = 1,
     this.expectedWeekday,
   });
@@ -261,6 +263,7 @@ class ActivityEntry {
     Object? closeTimeMinutes = _sentinel,
     Object? moodleModuleId = _sentinel,
     Object? moodleModuleName = _sentinel,
+    Object? modality = _sentinel,
     int? visibility,
     Object? expectedWeekday = _sentinel,
   }) {
@@ -290,6 +293,7 @@ class ActivityEntry {
       moodleModuleName: moodleModuleName == _sentinel
           ? this.moodleModuleName
           : moodleModuleName as String?,
+      modality: modality == _sentinel ? this.modality : modality as String?,
       visibility: visibility ?? this.visibility,
       expectedWeekday: expectedWeekday == _sentinel
           ? this.expectedWeekday
@@ -309,6 +313,7 @@ class ActivityEntry {
     'closeTimeMinutes': closeTimeMinutes,
     'moodleModuleId': moodleModuleId,
     'moodleModuleName': moodleModuleName,
+    'modality': modality,
     'visibility': visibility,
     'expectedWeekday': expectedWeekday,
   };
@@ -329,6 +334,7 @@ class ActivityEntry {
     closeTimeMinutes: json['closeTimeMinutes'] as int?,
     moodleModuleId: json['moodleModuleId'] as int?,
     moodleModuleName: json['moodleModuleName'] as String?,
+    modality: json['modality'] as String?,
     visibility:
         json['visibility'] as int? ?? (json['visible'] == false ? 0 : 1),
     expectedWeekday: json['expectedWeekday'] as int?,
