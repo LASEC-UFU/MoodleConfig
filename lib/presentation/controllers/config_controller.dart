@@ -68,21 +68,25 @@ class ConfigController extends ChangeNotifier {
     await loadAll();
   }
 
-  Future<void> importSpreadsheet(String filePath, {String? replaceId}) async {
+  Future<bool> importSpreadsheet(String filePath, {String? replaceId}) async {
     _loading = true;
     _error = null;
     notifyListeners();
     try {
       await _repo.importFromSpreadsheet(filePath, replaceId: replaceId);
       await loadAll();
+      _loading = false;
+      notifyListeners();
+      return true;
     } catch (e) {
       _error = 'Erro ao importar: $e';
+      _loading = false;
+      notifyListeners();
+      return false;
     }
-    _loading = false;
-    notifyListeners();
   }
 
-  Future<void> importSpreadsheetBytes(
+  Future<bool> importSpreadsheetBytes(
     Uint8List bytes, {
     String? replaceId,
   }) async {
@@ -92,11 +96,15 @@ class ConfigController extends ChangeNotifier {
     try {
       await _repo.importFromSpreadsheetBytes(bytes, replaceId: replaceId);
       await loadAll();
+      _loading = false;
+      notifyListeners();
+      return true;
     } catch (e) {
       _error = 'Erro ao importar: $e';
+      _loading = false;
+      notifyListeners();
+      return false;
     }
-    _loading = false;
-    notifyListeners();
   }
 
   /// Retorna configs existentes cujo nome coincide com alguma sheet da planilha.

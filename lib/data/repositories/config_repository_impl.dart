@@ -129,6 +129,35 @@ class ConfigRepositoryImpl implements IConfigRepository {
     return value.toString().trim();
   }
 
+  String _normalizedText(String text) {
+    return text
+        .trim()
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('ã', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('õ', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('ç', 'c');
+  }
+
+  int? _parseIntText(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return null;
+    final direct = int.tryParse(trimmed);
+    if (direct != null) return direct;
+    final asDouble = double.tryParse(trimmed.replaceAll(',', '.'));
+    if (asDouble == null) return null;
+    return asDouble.round();
+  }
+
   /// Tenta resolver o valor numérico de um CellValue, usando o cache de
   /// valores já resolvidos para avaliar fórmulas simples.
   double? _resolveNumeric(CellValue? value, Map<String, double> cache) {
@@ -199,8 +228,8 @@ class ConfigRepositoryImpl implements IConfigRepository {
           cache[_cellRef(r, c)] = serial;
         }
 
-        final text = _cellText(val);
-        if (text.contains('Inicio do Semestre')) {
+        final text = _normalizedText(_cellText(val));
+        if (text.contains('inicio do semestre')) {
           for (int nc = c + 1; nc < row.length; nc++) {
             final dateVal = row[nc]?.value;
             if (dateVal is DateCellValue) {
@@ -231,7 +260,9 @@ class ConfigRepositoryImpl implements IConfigRepository {
     int? headerRow;
     for (int r = 0; r < rawRows.length; r++) {
       final row = rawRows[r];
-      final texts = row.map((c) => _cellText(c?.value).toLowerCase()).toList();
+      final texts = row
+          .map((c) => _normalizedText(_cellText(c?.value)))
+          .toList();
       final joined = texts.join(' ');
       if (joined.contains('ordem') && joined.contains('tipo')) {
         headerRow = r;
@@ -244,7 +275,7 @@ class ConfigRepositoryImpl implements IConfigRepository {
     // Mapear colunas pelo header
     final hdrRow = rawRows[headerRow];
     final hdrTexts = hdrRow
-        .map((c) => _cellText(c?.value).toLowerCase())
+        .map((c) => _normalizedText(_cellText(c?.value)))
         .toList();
 
     int? colOrdem,
@@ -260,26 +291,22 @@ class ConfigRepositoryImpl implements IConfigRepository {
     for (int c = 0; c < hdrTexts.length; c++) {
       final h = hdrTexts[c].trim();
       if (h == 'ordem') colOrdem = c;
-      if (h.contains('dias') &&
-          (h.contains('início') || h.contains('inicio'))) {
+      if (h.contains('dias') && h.contains('inicio')) {
         colDiasInicio = c;
       }
-      if (h.contains('dias') &&
-          (h.contains('término') || h.contains('termino'))) {
+      if (h.contains('dias') && h.contains('termino')) {
         colDiasTermino = c;
       }
-      if (h.contains('hora') &&
-          (h.contains('início') || h.contains('inicio'))) {
+      if (h.contains('hora') && h.contains('inicio')) {
         colHoraInicio = c;
       }
-      if (h.contains('hora') &&
-          (h.contains('término') || h.contains('termino'))) {
+      if (h.contains('hora') && h.contains('termino')) {
         colHoraTermino = c;
       }
       if (h == 'nome') colNome = c;
       if (h == 'tipo') colTipo = c;
-      if (h.contains('visível') || h.contains('visivel')) colVisivel = c;
-      if (h.contains('descrição') || h.contains('descricao')) colDesc = c;
+      if (h.contains('visivel')) colVisivel = c;
+      if (h.contains('descricao')) colDesc = c;
       if (h.contains('moodle id')) colMoodleId = c;
     }
 
@@ -294,14 +321,14 @@ class ConfigRepositoryImpl implements IConfigRepository {
       final row = rawRows[r];
       final texts = row.map((c) => _cellText(c?.value)).toList();
       for (int c = 0; c < texts.length; c++) {
-        if (texts[c].toLowerCase().contains('disciplina')) {
+        if (_normalizedText(texts[c]).contains('disciplina')) {
           if (c + 1 < texts.length && texts[c + 1].isNotEmpty) {
             moodleCourseName = texts[c + 1];
           }
         }
-        if (texts[c].toLowerCase().contains('moodle course id')) {
+        if (_normalizedText(texts[c]).contains('moodle course id')) {
           if (c + 1 < texts.length) {
-            moodleCourseId = int.tryParse(texts[c + 1]);
+            moodleCourseId = _parseIntText(texts[c + 1]);
           }
         }
       }
@@ -323,14 +350,14 @@ class ConfigRepositoryImpl implements IConfigRepository {
       final visivel = cellAt(colVisivel);
       final desc = cellAt(colDesc);
       final moodleIdStr = cellAt(colMoodleId);
-      final moodleId = int.tryParse(moodleIdStr);
+      final moodleId = _parseIntText(moodleIdStr);
 
       final openStr = cellAt(colDiasInicio);
-      final openOffset = int.tryParse(openStr);
+      final openOffset = _parseIntText(openStr);
       int? closeOffset;
       if (colDiasTermino != null) {
         final closeStr = cellAt(colDiasTermino);
-        closeOffset = int.tryParse(closeStr);
+        closeOffset = _parseIntText(closeStr);
       }
       int? openTimeMinutes;
       if (colHoraInicio != null) {
@@ -341,13 +368,16 @@ class ConfigRepositoryImpl implements IConfigRepository {
         closeTimeMinutes = _parseTimeToMinutes(cellAt(colHoraTermino));
       }
 
-      final isVisible = visivel.toLowerCase() != 'não';
-      final activityVisibility = visivel.toLowerCase() == 'stealth'
+      final normalizedVisibility = _normalizedText(visivel);
+      final isHidden =
+          normalizedVisibility == 'nao' || normalizedVisibility == 'n';
+      final isVisible = !isHidden;
+      final activityVisibility = normalizedVisibility == 'stealth'
           ? 2
-          : (visivel.toLowerCase() == 'não' ? 0 : 1);
+          : (isHidden ? 0 : 1);
 
-      if (tipo.toLowerCase() == 'seção') {
-        final orderIndex = int.tryParse(ordem) ?? (sections.length + 1);
+      if (_normalizedText(tipo) == 'secao') {
+        final orderIndex = _parseIntText(ordem) ?? (sections.length + 1);
         final offset = openOffset ?? 0;
         final date = semesterStart.add(Duration(days: offset));
         currentSection = SectionEntry(

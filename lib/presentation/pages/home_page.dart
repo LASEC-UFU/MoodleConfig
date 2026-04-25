@@ -1,12 +1,16 @@
+import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
 import 'package:config_moodle/data/template_generator.dart';
+import 'package:config_moodle/data/web_xlsx_picker.dart';
+import 'package:config_moodle/data/word_table_generator.dart';
+import 'package:config_moodle/domain/entities/course_config.dart';
 import 'package:config_moodle/domain/entities/moodle_entities.dart';
 import 'package:config_moodle/presentation/controllers/config_controller.dart';
 import 'package:config_moodle/presentation/controllers/auth_controller.dart';
@@ -23,6 +27,9 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  String? _importStatus;
+  bool _importStatusIsError = false;
+
   @override
   void initState() {
     super.initState();
@@ -57,6 +64,7 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             children: [
               _buildAppBar(context, authCtrl),
+              if (_importStatus != null) _buildImportStatusBanner(),
               Expanded(
                 child: configCtrl.loading
                     ? const Center(
@@ -155,6 +163,49 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  Widget _buildImportStatusBanner() {
+    final color = _importStatusIsError ? AppTheme.danger : AppTheme.accentGreen;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withAlpha(35),
+          border: Border.all(color: color.withAlpha(120)),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              _importStatusIsError ? Icons.error_outline : Icons.info_outline,
+              color: color,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _importStatus!,
+                style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Fechar',
+              onPressed: () => setState(() => _importStatus = null),
+              icon: const Icon(Icons.close, size: 18),
+              color: AppTheme.textSecondary,
+              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+              padding: EdgeInsets.zero,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildGrid(
     BuildContext context,
     ConfigController ctrl,
@@ -191,7 +242,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildConfigCard(
     BuildContext context,
-    dynamic config,
+    CourseConfig config,
     ConfigController ctrl,
     DateFormat df,
   ) {
@@ -250,6 +301,8 @@ class _HomePageState extends State<HomePage> {
                     if (confirm == true) ctrl.deleteConfig(config.id);
                   } else if (value == 'export') {
                     _exportSpreadsheet(context, config.id);
+                  } else if (value == 'word') {
+                    _showWordTableDialog(context, config);
                   } else if (value == 'sync') {
                     context.push('/sync/${config.id}');
                   }
@@ -276,6 +329,20 @@ class _HomePageState extends State<HomePage> {
                         ),
                         SizedBox(width: 8),
                         Text('Exportar XLSX'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'word',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.content_paste,
+                          size: 18,
+                          color: AppTheme.primary,
+                        ),
+                        SizedBox(width: 8),
+                        Text('Tabela Word'),
                       ],
                     ),
                   ),
@@ -326,7 +393,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               const Spacer(),
               InkWell(
-                onTap: () => _exportSpreadsheet(context, config.id),
+                onTap: () => _showWordTableDialog(context, config),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
@@ -343,10 +410,14 @@ class _HomePageState extends State<HomePage> {
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.download, size: 14, color: AppTheme.accent),
+                      Icon(
+                        Icons.content_paste,
+                        size: 14,
+                        color: AppTheme.accent,
+                      ),
                       SizedBox(width: 4),
                       Text(
-                        'XLSX',
+                        'Word',
                         style: TextStyle(
                           fontSize: 11,
                           color: AppTheme.accent,
@@ -371,7 +442,7 @@ class _HomePageState extends State<HomePage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => Padding(
+      builder: (sheetContext) => Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -404,9 +475,17 @@ class _HomePageState extends State<HomePage> {
               ),
               title: const Text('Importar Planilha'),
               subtitle: const Text('Importar de arquivo .xlsx'),
-              onTap: () {
-                Navigator.pop(context);
-                _importSpreadsheet(context);
+              onTap: () async {
+                _setImportStatus('Abrindo seletor de arquivo...', false);
+                if (kIsWeb) {
+                  await _importSpreadsheet(context);
+                  if (sheetContext.mounted) Navigator.pop(sheetContext);
+                  return;
+                }
+                Navigator.pop(sheetContext);
+                await Future<void>.delayed(const Duration(milliseconds: 150));
+                if (!mounted) return;
+                await _importSpreadsheet(this.context);
               },
             ),
             const Divider(color: AppTheme.divider),
@@ -491,26 +570,129 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _importSpreadsheet(BuildContext context) async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['xlsx'],
-      dialogTitle: 'Selecionar planilha (.xlsx)',
-      withData: kIsWeb, // No web, precisamos dos bytes
-    );
-    if (result == null) return;
+    if (kIsWeb) {
+      await _importSpreadsheetWeb(context);
+      return;
+    }
+
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx'],
+        dialogTitle: 'Selecionar planilha (.xlsx)',
+        withData: true,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        _setImportStatus('Erro ao abrir o seletor de arquivo: $e', true);
+        _showImportSnackBar(
+          context,
+          'Erro ao abrir o seletor de arquivo: $e',
+          isError: true,
+        );
+      }
+      return;
+    }
+    if (result == null) {
+      if (context.mounted) {
+        _setImportStatus('Nenhum arquivo selecionado.', true);
+        _showImportSnackBar(
+          context,
+          'Nenhum arquivo selecionado.',
+          isError: true,
+        );
+      }
+      return;
+    }
 
     final file = result.files.single;
     final filePath = file.path;
     final fileBytes = file.bytes;
+    if (context.mounted) {
+      _setImportStatus(
+        'Arquivo recebido: ${file.name}. Preparando importação...',
+        false,
+      );
+      _showImportSnackBar(
+        context,
+        'Importando "${file.name}"...',
+        isError: false,
+      );
+    }
 
-    // No web, path é null; usamos bytes diretamente
-    if (kIsWeb) {
-      if (fileBytes == null) return;
+    try {
+      // No web, path é null; usamos bytes diretamente
+      if (kIsWeb || filePath == null) {
+        if (fileBytes == null) {
+          if (context.mounted) {
+            _setImportStatus(
+              'O navegador não entregou os bytes do arquivo selecionado.',
+              true,
+            );
+            _showImportSnackBar(
+              context,
+              'Não foi possível ler o arquivo selecionado.',
+              isError: true,
+            );
+          }
+          return;
+        }
+        if (!context.mounted) return;
+
+        final ctrl = context.read<ConfigController>();
+        try {
+          final duplicates = ctrl.findDuplicatesFromBytes(fileBytes);
+          if (duplicates.isNotEmpty && context.mounted) {
+            final existing = duplicates.first;
+            final action = await showDialog<String>(
+              context: context,
+              builder: (_) => AlertDialog(
+                title: const Text('Configuração já existe'),
+                content: Text(
+                  'Já existe "${existing.name}" salva.\n'
+                  'Deseja substituir a existente ou criar uma nova cópia?',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, 'cancel'),
+                    child: const Text('Cancelar'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, 'new'),
+                    child: const Text('Criar nova'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.pop(context, 'replace'),
+                    child: const Text('Substituir'),
+                  ),
+                ],
+              ),
+            );
+            if (action == null || action == 'cancel') return;
+            if (action == 'replace') {
+              final ok = await ctrl.importSpreadsheetBytes(
+                fileBytes,
+                replaceId: existing.id,
+              );
+              if (context.mounted) _showImportResult(context, ctrl, ok);
+              return;
+            }
+          }
+        } catch (_) {}
+        final ok = await ctrl.importSpreadsheetBytes(fileBytes);
+        if (context.mounted) _showImportResult(context, ctrl, ok);
+        return;
+      }
+
+      // Desktop: usa filePath
       if (!context.mounted) return;
 
       final ctrl = context.read<ConfigController>();
+
+      // Verificar se já existe config com mesmo nome
       try {
-        final duplicates = ctrl.findDuplicatesFromBytes(fileBytes);
+        final duplicates = ctrl.findDuplicates(filePath);
         if (duplicates.isNotEmpty && context.mounted) {
           final existing = duplicates.first;
           final action = await showDialog<String>(
@@ -539,27 +721,74 @@ class _HomePageState extends State<HomePage> {
           );
           if (action == null || action == 'cancel') return;
           if (action == 'replace') {
-            await ctrl.importSpreadsheetBytes(
-              fileBytes,
+            final ok = await ctrl.importSpreadsheet(
+              filePath,
               replaceId: existing.id,
             );
+            if (context.mounted) _showImportResult(context, ctrl, ok);
             return;
           }
         }
-      } catch (_) {}
-      await ctrl.importSpreadsheetBytes(fileBytes);
+      } catch (_) {
+        // Se der erro no parse, deixa seguir normalmente
+      }
+
+      final ok = await ctrl.importSpreadsheet(filePath);
+      if (context.mounted) _showImportResult(context, ctrl, ok);
+    } catch (e) {
+      if (context.mounted) {
+        _setImportStatus('Erro inesperado ao importar: $e', true);
+        _showImportSnackBar(
+          context,
+          'Erro inesperado ao importar: $e',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  Future<void> _importSpreadsheetWeb(BuildContext context) async {
+    PickedXlsxFile? picked;
+    try {
+      picked = await pickXlsxFileForWeb();
+    } catch (e) {
+      if (context.mounted) {
+        _setImportStatus('Erro ao ler arquivo no navegador: $e', true);
+        _showImportSnackBar(
+          context,
+          'Erro ao ler arquivo no navegador: $e',
+          isError: true,
+        );
+      }
       return;
     }
 
-    // Desktop: usa filePath
-    if (filePath == null) return;
+    if (picked == null) {
+      if (context.mounted) {
+        _setImportStatus('Nenhum arquivo selecionado.', true);
+        _showImportSnackBar(
+          context,
+          'Nenhum arquivo selecionado.',
+          isError: true,
+        );
+      }
+      return;
+    }
+
     if (!context.mounted) return;
+    _setImportStatus(
+      'Arquivo recebido: ${picked.name}. Preparando importação...',
+      false,
+    );
+    _showImportSnackBar(
+      context,
+      'Importando "${picked.name}"...',
+      isError: false,
+    );
 
     final ctrl = context.read<ConfigController>();
-
-    // Verificar se já existe config com mesmo nome
     try {
-      final duplicates = ctrl.findDuplicates(filePath);
+      final duplicates = ctrl.findDuplicatesFromBytes(picked.bytes);
       if (duplicates.isNotEmpty && context.mounted) {
         final existing = duplicates.first;
         final action = await showDialog<String>(
@@ -588,15 +817,71 @@ class _HomePageState extends State<HomePage> {
         );
         if (action == null || action == 'cancel') return;
         if (action == 'replace') {
-          await ctrl.importSpreadsheet(filePath, replaceId: existing.id);
+          final ok = await ctrl.importSpreadsheetBytes(
+            picked.bytes,
+            replaceId: existing.id,
+          );
+          if (context.mounted) _showImportResult(context, ctrl, ok);
           return;
         }
       }
-    } catch (_) {
-      // Se der erro no parse, deixa seguir normalmente
-    }
+    } catch (_) {}
 
-    await ctrl.importSpreadsheet(filePath);
+    try {
+      final ok = await ctrl.importSpreadsheetBytes(picked.bytes);
+      if (context.mounted) _showImportResult(context, ctrl, ok);
+    } catch (e) {
+      if (context.mounted) {
+        _setImportStatus('Erro inesperado ao importar: $e', true);
+        _showImportSnackBar(
+          context,
+          'Erro inesperado ao importar: $e',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  void _showImportResult(BuildContext context, ConfigController ctrl, bool ok) {
+    if (ok) {
+      _setImportStatus('Planilha importada com sucesso!', false);
+      _showImportSnackBar(
+        context,
+        'Planilha importada com sucesso!',
+        isError: false,
+      );
+      return;
+    }
+    _setImportStatus(
+      ctrl.error ?? 'Não foi possível importar a planilha.',
+      true,
+    );
+    _showImportSnackBar(
+      context,
+      ctrl.error ?? 'Não foi possível importar a planilha.',
+      isError: true,
+    );
+  }
+
+  void _showImportSnackBar(
+    BuildContext context,
+    String message, {
+    required bool isError,
+  }) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? AppTheme.danger : AppTheme.accentGreen,
+      ),
+    );
+  }
+
+  void _setImportStatus(String message, bool isError) {
+    if (!mounted) return;
+    setState(() {
+      _importStatus = message;
+      _importStatusIsError = isError;
+    });
   }
 
   Future<void> _exportSpreadsheet(BuildContext context, String id) async {
@@ -624,6 +909,16 @@ class _HomePageState extends State<HomePage> {
         ),
       );
     }
+  }
+
+  Future<void> _showWordTableDialog(
+    BuildContext context,
+    CourseConfig config,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _WordTableDialog(config: config),
+    );
   }
 
   Future<void> _downloadTemplate(BuildContext context) async {
@@ -872,6 +1167,180 @@ class _HomePageState extends State<HomePage> {
 }
 
 // ── Helper classes para importação do Moodle ──────────────────────────────
+
+class _WordTableDialog extends StatefulWidget {
+  final CourseConfig config;
+
+  const _WordTableDialog({required this.config});
+
+  @override
+  State<_WordTableDialog> createState() => _WordTableDialogState();
+}
+
+class _WordTableDialogState extends State<_WordTableDialog> {
+  WordTablePreset _preset = WordTablePreset.practice;
+  bool _onlyMatchingModality = true;
+  bool _includeActivitiesInSubject = false;
+  final Set<WordTableColumn> _columns = {
+    WordTableColumn.date,
+    WordTableColumn.modality,
+    WordTableColumn.classGroup,
+    WordTableColumn.taughtSubject,
+  };
+
+  WordTableOptions get _options => WordTableOptions(
+    preset: _preset,
+    columns: _columns,
+    onlyMatchingModality: _onlyMatchingModality,
+    includeActivitiesInSubject: _includeActivitiesInSubject,
+  );
+
+  int get _rowCount =>
+      WordTableGenerator.buildRows(widget.config, _options).length;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Tabela para Word'),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SegmentedButton<WordTablePreset>(
+                segments: const [
+                  ButtonSegment(
+                    value: WordTablePreset.practice,
+                    label: Text('Prática'),
+                    icon: Icon(Icons.science_outlined),
+                  ),
+                  ButtonSegment(
+                    value: WordTablePreset.theory,
+                    label: Text('Teórica'),
+                    icon: Icon(Icons.menu_book_outlined),
+                  ),
+                  ButtonSegment(
+                    value: WordTablePreset.all,
+                    label: Text('Todas'),
+                    icon: Icon(Icons.table_rows_outlined),
+                  ),
+                ],
+                selected: {_preset},
+                onSelectionChanged: (value) {
+                  setState(() => _preset = value.first);
+                },
+              ),
+              const SizedBox(height: 16),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _onlyMatchingModality,
+                title: const Text('Filtrar pela modalidade escolhida'),
+                subtitle: Text('Linhas encontradas: $_rowCount'),
+                onChanged: (value) {
+                  setState(() => _onlyMatchingModality = value);
+                },
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _includeActivitiesInSubject,
+                title: const Text('Juntar atividades na matéria'),
+                controlAffinity: ListTileControlAffinity.leading,
+                onChanged: (value) {
+                  setState(() => _includeActivitiesInSubject = value ?? false);
+                },
+              ),
+              const Divider(color: AppTheme.divider),
+              const Text(
+                'Colunas',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: WordTableColumn.values.map((column) {
+                  final selected = _columns.contains(column);
+                  return FilterChip(
+                    label: Text(column.label),
+                    selected: selected,
+                    onSelected: (value) {
+                      setState(() {
+                        if (value) {
+                          _columns.add(column);
+                        } else if (_columns.length > 1) {
+                          _columns.remove(column);
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Fechar'),
+        ),
+        OutlinedButton.icon(
+          onPressed: _rowCount == 0 ? null : _saveHtml,
+          icon: const Icon(Icons.save_alt),
+          label: const Text('Salvar HTML'),
+        ),
+        ElevatedButton.icon(
+          onPressed: _rowCount == 0 ? null : _copyTable,
+          icon: const Icon(Icons.content_copy),
+          label: const Text('Copiar'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _copyTable() async {
+    final text = WordTableGenerator.generateTsv(widget.config, _options);
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Tabela copiada. Cole no Word.'),
+        backgroundColor: AppTheme.accentGreen,
+      ),
+    );
+  }
+
+  Future<void> _saveHtml() async {
+    final html = WordTableGenerator.generateHtml(widget.config, _options);
+    final bytes = Uint8List.fromList(utf8.encode(html));
+    final filename = _safeFileName(
+      '${widget.config.name}_${_preset.label}_word.html',
+    );
+    final result = await FilePicker.platform.saveFile(
+      dialogTitle: 'Salvar tabela para Word',
+      fileName: filename,
+      type: FileType.custom,
+      allowedExtensions: ['html'],
+      bytes: bytes,
+    );
+    if (result == null || !mounted) return;
+    if (!kIsWeb) {
+      File(result).writeAsBytesSync(bytes);
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Tabela HTML salva com sucesso!'),
+        backgroundColor: AppTheme.accentGreen,
+      ),
+    );
+  }
+
+  String _safeFileName(String name) {
+    return name.replaceAll(RegExp(r'[<>:"/\\|?*]+'), '_');
+  }
+}
 
 class _MoodleImportResult {
   final MoodleCourse course;
